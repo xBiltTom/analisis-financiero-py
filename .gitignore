@@ -1,0 +1,19 @@
+echo "__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.so
+.pytest_cache/
+.coverage
+htmlcov/
+*.egg-info/
+dist/
+build/
+*.xlsx
+*.xls
+*.csv
+.env
+.venv
+venv/
+*.log" > .gitignore
