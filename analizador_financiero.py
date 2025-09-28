@@ -9,6 +9,7 @@ from bs4 import BeautifulSoup
 import numpy as np
 import chardet
 from typing import Dict, List, Tuple, Any
+from analisis_vertical_horizontal import AnalisisVerticalHorizontal
 
 # Configuración de la página
 st.set_page_config(
@@ -618,7 +619,7 @@ def main():
             st.header("📈 Análisis Consolidado")
             
             # Crear tabs para diferentes vistas
-            tab1, tab2, tab3, tab4 = st.tabs(["Resumen General", "Estados Financieros", "Comparativo", "Datos Detallados"])
+            tab1, tab2, tab3, tab4, tab5 = st.tabs(["Resumen General", "Estados Financieros", "Análisis Vertical", "Comparativo", "Datos Detallados"])
             
             with tab1:
                 st.subheader("Resumen de todos los archivos procesados")
@@ -709,6 +710,139 @@ def main():
                     st.divider()
             
             with tab3:
+                st.subheader("📊 Análisis Vertical - Estado de Situación Financiera")
+                
+                try:
+                    # Crear instancia del analizador vertical
+                    analizador_vertical = AnalisisVerticalHorizontal()
+                    
+                    # Determinar años para análisis
+                    años_para_analisis = set()
+                    empresas_analizadas = set()
+                    
+                    for resultado in resultados_analisis:
+                        años_disponibles = resultado['datos'].get('años_disponibles', [])
+                        empresa = resultado['resumen'].get('empresa', 'Sin empresa')
+                        empresas_analizadas.add(empresa)
+                        
+                        # Si es un solo archivo, usar año actual y anterior
+                        if len(resultados_analisis) == 1:
+                            if años_disponibles:
+                                # Tomar los primeros 2 años (más recientes)
+                                años_para_analisis.update(años_disponibles[:2])
+                        else:
+                            # Si son múltiples archivos, tomar todos los años únicos
+                            años_para_analisis.update(años_disponibles)
+                    
+                    años_ordenados = sorted(list(años_para_analisis), reverse=True)
+                    
+                    st.info(f"🏢 Empresas analizadas: {', '.join(empresas_analizadas)}")
+                    st.info(f"📅 Años incluidos en análisis: {', '.join(años_ordenados)}")
+                    
+                    if not años_ordenados:
+                        st.warning("No se encontraron años válidos para realizar el análisis vertical")
+                    else:
+                        # Realizar análisis vertical
+                        with st.spinner("Realizando análisis vertical..."):
+                            resultados_vertical = analizador_vertical.realizar_analisis_vertical_situacion_financiera(
+                                resultados_analisis, años_ordenados
+                            )
+                        
+                        if resultados_vertical['errores']:
+                            st.error("❌ Errores en el análisis vertical:")
+                            for error in resultados_vertical['errores']:
+                                st.error(f"- {error}")
+                        
+                        if resultados_vertical['analisis_por_año']:
+                            st.success(f"✅ Análisis vertical completado para {len(resultados_vertical['analisis_por_año'])} año(s)")
+                            
+                            # Mostrar resultados por año
+                            for año, datos_año in resultados_vertical['analisis_por_año'].items():
+                                with st.expander(f"📊 Análisis Vertical - Año {año}", expanded=True):
+                                    
+                                    # Mostrar totales principales
+                                    col1, col2, col3 = st.columns(3)
+                                    with col1:
+                                        total_activos = datos_año['activos']['total_activos']
+                                        st.metric("Total Activos", f"{total_activos:,.2f}")
+                                    
+                                    with col2:
+                                        total_pasivos = datos_año['pasivos']['total_pasivos']
+                                        st.metric("Total Pasivos", f"{total_pasivos:,.2f}")
+                                    
+                                    with col3:
+                                        total_patrimonio = datos_año['patrimonio']['total_patrimonio']
+                                        st.metric("Total Patrimonio", f"{total_patrimonio:,.2f}")
+                                    
+                                    # Mostrar análisis de activos
+                                    if datos_año['activos']['cuentas']:
+                                        st.write("#### 💰 Análisis Vertical - ACTIVOS")
+                                        st.write("*(Cada cuenta como % del Total de Activos)*")
+                                        
+                                        df_activos = pd.DataFrame(datos_año['activos']['cuentas'])
+                                        df_activos['Valor_Formateado'] = df_activos['valor'].apply(lambda x: f"{x:,.2f}")
+                                        df_activos['Porcentaje_Formateado'] = df_activos['porcentaje_vertical'].apply(lambda x: f"{x:.2f}%")
+                                        
+                                        df_mostrar = df_activos[['cuenta', 'Valor_Formateado', 'Porcentaje_Formateado']].copy()
+                                        df_mostrar.columns = ['Cuenta', 'Valor', '% Vertical']
+                                        
+                                        st.dataframe(df_mostrar, use_container_width=True)
+                                        
+                                        # Gráfico de barras para activos principales
+                                        activos_principales = df_activos.nlargest(5, 'porcentaje_vertical')
+                                        if not activos_principales.empty:
+                                            st.bar_chart(
+                                                data=activos_principales.set_index('cuenta')['porcentaje_vertical'],
+                                                use_container_width=True
+                                            )
+                                    
+                                    # Mostrar análisis de pasivos
+                                    if datos_año['pasivos']['cuentas']:
+                                        st.write("#### 💳 Análisis Vertical - PASIVOS")
+                                        st.write("*(Cada cuenta como % del Total de Pasivos)*")
+                                        
+                                        df_pasivos = pd.DataFrame(datos_año['pasivos']['cuentas'])
+                                        df_pasivos['Valor_Formateado'] = df_pasivos['valor'].apply(lambda x: f"{x:,.2f}")
+                                        df_pasivos['Porcentaje_Formateado'] = df_pasivos['porcentaje_vertical'].apply(lambda x: f"{x:.2f}%")
+                                        
+                                        df_mostrar_p = df_pasivos[['cuenta', 'Valor_Formateado', 'Porcentaje_Formateado']].copy()
+                                        df_mostrar_p.columns = ['Cuenta', 'Valor', '% Vertical']
+                                        
+                                        st.dataframe(df_mostrar_p, use_container_width=True)
+                                    
+                                    # Mostrar análisis de patrimonio
+                                    if datos_año['patrimonio']['cuentas']:
+                                        st.write("#### 🏛️ Análisis Vertical - PATRIMONIO")
+                                        
+                                        df_patrimonio = pd.DataFrame(datos_año['patrimonio']['cuentas'])
+                                        df_patrimonio['Valor_Formateado'] = df_patrimonio['valor'].apply(lambda x: f"{x:,.2f}")
+                                        df_patrimonio['Porcentaje_Formateado'] = df_patrimonio['porcentaje_vertical'].apply(lambda x: f"{x:.2f}%")
+                                        
+                                        df_mostrar_pat = df_patrimonio[['cuenta', 'Valor_Formateado', 'Porcentaje_Formateado']].copy()
+                                        df_mostrar_pat.columns = ['Cuenta', 'Valor', '% Vertical']
+                                        
+                                        st.dataframe(df_mostrar_pat, use_container_width=True)
+                            
+                            # Botón para descargar análisis vertical
+                            if st.button("📥 Descargar Análisis Vertical en Excel"):
+                                archivo_temporal = f"analisis_vertical_{pd.Timestamp.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
+                                analizador_vertical.exportar_analisis_vertical(resultados_vertical, archivo_temporal)
+                                
+                                with open(archivo_temporal, 'rb') as file:
+                                    st.download_button(
+                                        label="⬇️ Descargar Archivo Excel",
+                                        data=file.read(),
+                                        file_name=archivo_temporal,
+                                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                                    )
+                        else:
+                            st.warning("No se pudieron generar resultados de análisis vertical")
+                
+                except Exception as e:
+                    st.error(f"❌ Error en análisis vertical: {str(e)}")
+                    st.error("Verifique que los archivos contengan Estado de Situación Financiera válido")
+            
+            with tab4:
                 st.subheader("Análisis comparativo entre períodos")
                 
                 if len(resultados_analisis) > 1:
@@ -739,7 +873,7 @@ def main():
                 else:
                     st.info("Sube más de un archivo para realizar comparaciones")
             
-            with tab4:
+            with tab5:
                 st.subheader("Datos detallados por archivo")
                 
                 for resultado in resultados_analisis:
