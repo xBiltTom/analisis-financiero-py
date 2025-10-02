@@ -7,11 +7,12 @@ from pathlib import Path
 import re
 from bs4 import BeautifulSoup
 import numpy as np
-import chardet
+# import chardet  # No se usa en el código
 from typing import Dict, List, Tuple, Any
 from analisis_vertical_horizontal import AnalisisVerticalHorizontal
 from extractor_estados_mejorado import ExtractorEstadosFinancieros
 from analisis_vertical_mejorado import AnalisisVerticalMejorado
+from analisis_horizontal_mejorado import AnalisisHorizontalMejorado
 
 # Configuración de la página
 st.set_page_config(
@@ -28,6 +29,7 @@ class AnalizadorFinanciero:
         self.palabras_clave = self.cargar_diccionario_palabras_clave()
         self.extractor_mejorado = ExtractorEstadosFinancieros()  # ✨ Nuevo extractor mejorado
         self.analizador_vertical = AnalisisVerticalMejorado()  # ✨ Nuevo analizador vertical
+        self.analizador_horizontal = AnalisisHorizontalMejorado()  # ✨ Nuevo analizador horizontal
         
     def crear_directorio_temporal(self):
         """Crear directorio temporal para almacenar archivos"""
@@ -95,11 +97,14 @@ class AnalizadorFinanciero:
             st.error(f"Error al convertir XLS a HTML: {str(e)}")
             return None
     
-    def extraer_datos_html(self, archivo_html: str) -> Dict[str, Any]:
+    def extraer_datos_html(self, archivo_html: str) -> Tuple[Dict[str, Any], Dict[str, Any]]:
         """
         Extraer datos importantes del archivo HTML usando el EXTRACTOR MEJORADO
         
         ✨ NUEVO: Usa extractor_estados_mejorado.py para extracción precisa de bloques
+        
+        Returns:
+            Tuple con (datos_legacy, resultados_extractor_mejorado)
         """
         try:
             st.info("🔍 Usando Extractor Mejorado con detección automática de formato...")
@@ -139,13 +144,14 @@ class AnalizadorFinanciero:
                 for error in resultados_mejorados['errores']:
                     st.write(f"   • {error}")
             
-            return datos_extraidos
+            # Retornar AMBOS formatos
+            return datos_extraidos, resultados_mejorados
             
         except Exception as e:
             st.error(f"❌ Error al extraer datos con extractor mejorado: {str(e)}")
             import traceback
             st.error(traceback.format_exc())
-            return {}
+            return {}, {}
     
     def _convertir_formato_mejorado_a_legacy(self, resultados_mejorados: Dict) -> Dict[str, Any]:
         """
@@ -201,10 +207,18 @@ class AnalizadorFinanciero:
                 # Convertir cuentas al formato legacy
                 cuentas_legacy = []
                 for cuenta in estado_mejorado['cuentas']:
-                    cuenta_legacy = {
-                        'cuenta': cuenta['nombre'],
-                        'es_total': cuenta['es_total']
-                    }
+                    # ✨ NUEVO: Para patrimonio, incluir CCUENTA si existe
+                    if 'ccuenta' in cuenta:
+                        cuenta_legacy = {
+                            'ccuenta': cuenta.get('ccuenta', ''),
+                            'cuenta': cuenta['nombre'],
+                            'es_total': cuenta['es_total']
+                        }
+                    else:
+                        cuenta_legacy = {
+                            'cuenta': cuenta['nombre'],
+                            'es_total': cuenta['es_total']
+                        }
                     
                     # Agregar valores por año
                     for año in datos_legacy['años_disponibles']:
@@ -221,7 +235,8 @@ class AnalizadorFinanciero:
                     'nombre': estado_mejorado['nombre'],
                     'años': estado_mejorado['años'],
                     'datos': cuentas_legacy,
-                    'total_cuentas': estado_mejorado['total_cuentas']
+                    'total_cuentas': estado_mejorado['total_cuentas'],
+                    'columnas_especiales': estado_mejorado.get('columnas_especiales', None)  # ✨ NUEVO
                 }
         
         return datos_legacy
@@ -698,6 +713,7 @@ class AnalizadorFinanciero:
             # Diccionario para consolidar: {nombre_cuenta: {año1: valor1, año2: valor2, ...}}
             cuentas_consolidadas = {}
             años_disponibles = set()
+            tiene_ccuenta = False  # ✨ NUEVO: Flag para patrimonio
             
             # Procesar cada archivo
             for resultado in archivos_post_2010:
@@ -707,43 +723,79 @@ class AnalizadorFinanciero:
                 if nombre_estado in estados_financieros:
                     estado_datos = estados_financieros[nombre_estado]
                     
+                    # ✨ NUEVO: Detectar si este estado tiene CCUENTA (Estado de Cambios en Patrimonio)
+                    if estado_datos.get('columnas_especiales'):
+                        tiene_ccuenta = True
+                    
                     # Procesar cada cuenta del estado
                     for item in estado_datos.get('datos', []):
-                        nombre_cuenta = item.get('cuenta', 'Sin cuenta')
+                        # ✨ NUEVO: Para patrimonio, usar CCUENTA como identificador
+                        if tiene_ccuenta and 'ccuenta' in item:
+                            ccuenta = item.get('ccuenta', '')
+                            nombre_cuenta = item.get('cuenta', 'Sin cuenta')
+                            clave_cuenta = f"{ccuenta}|{nombre_cuenta}"  # Usar CCUENTA|Cuenta como clave única
+                        else:
+                            nombre_cuenta = item.get('cuenta', 'Sin cuenta')
+                            clave_cuenta = nombre_cuenta
                         
                         # Inicializar cuenta si no existe
-                        if nombre_cuenta not in cuentas_consolidadas:
-                            cuentas_consolidadas[nombre_cuenta] = {}
+                        if clave_cuenta not in cuentas_consolidadas:
+                            if tiene_ccuenta:
+                                cuentas_consolidadas[clave_cuenta] = {
+                                    'ccuenta': item.get('ccuenta', ''),
+                                    'cuenta': nombre_cuenta
+                                }
+                            else:
+                                cuentas_consolidadas[clave_cuenta] = {'cuenta': nombre_cuenta}
                         
                         # Agregar valores por año (solo si no se ha procesado ese año antes)
                         for clave, valor in item.items():
-                            if clave != 'cuenta' and isinstance(valor, dict):
+                            if clave not in ['cuenta', 'ccuenta', 'es_total'] and isinstance(valor, dict):
                                 # Extraer año y valor numérico
                                 año_str = str(clave)
                                 if año_str.isdigit():
                                     año = int(año_str)
                                     
                                     # Solo agregar si ese año no ha sido procesado para esta cuenta
-                                    if año not in cuentas_consolidadas[nombre_cuenta]:
+                                    if año not in cuentas_consolidadas[clave_cuenta]:
                                         numero = valor.get('numero', 0)
-                                        cuentas_consolidadas[nombre_cuenta][año] = numero
+                                        cuentas_consolidadas[clave_cuenta][año] = numero
                                         años_disponibles.add(año)
             
             # Convertir a DataFrame
             if cuentas_consolidadas:
                 # Crear lista de filas para DataFrame
                 filas_consolidadas = []
-                for nombre_cuenta, valores_años in cuentas_consolidadas.items():
-                    fila = {'Cuenta': nombre_cuenta}
-                    fila.update(valores_años)
+                for clave_cuenta, datos_cuenta in cuentas_consolidadas.items():
+                    fila = {}
+                    
+                    # ✨ NUEVO: Para patrimonio, incluir CCUENTA
+                    if tiene_ccuenta:
+                        fila['CCUENTA'] = datos_cuenta.get('ccuenta', '')
+                        fila['Cuenta'] = datos_cuenta.get('cuenta', '')
+                    else:
+                        fila['Cuenta'] = datos_cuenta.get('cuenta', '')
+                    
+                    # Agregar valores por año
+                    for año in sorted(años_disponibles, reverse=True):
+                        if año in datos_cuenta:
+                            fila[año] = datos_cuenta[año]
+                    
                     filas_consolidadas.append(fila)
                 
                 df = pd.DataFrame(filas_consolidadas)
                 
-                # Ordenar columnas: primero 'Cuenta', luego años descendentes
-                columnas = ['Cuenta']
-                años_cols = sorted([col for col in df.columns if col != 'Cuenta'], reverse=True)
-                columnas.extend(años_cols)
+                # ✨ NUEVO: Ordenar columnas según el tipo de estado
+                if tiene_ccuenta:
+                    # Para patrimonio: CCUENTA, Cuenta, luego años descendentes
+                    columnas = ['CCUENTA', 'Cuenta']
+                    años_cols = sorted([col for col in df.columns if col not in ['CCUENTA', 'Cuenta']], reverse=True)
+                    columnas.extend(años_cols)
+                else:
+                    # Para otros estados: Cuenta, luego años descendentes
+                    columnas = ['Cuenta']
+                    años_cols = sorted([col for col in df.columns if col != 'Cuenta'], reverse=True)
+                    columnas.extend(años_cols)
                 
                 # Reordenar y llenar valores faltantes con 0
                 df = df[columnas].fillna(0)
@@ -795,8 +847,8 @@ def main():
                         
                         st.info("⏳ Extrayendo datos financieros...")
                         
-                        # Extraer datos
-                        datos_extraidos = analizador.extraer_datos_html(archivo_html)
+                        # Extraer datos (retorna tupla: datos_legacy, resultados_extractor)
+                        datos_extraidos, resultados_extractor = analizador.extraer_datos_html(archivo_html)
                         
                         if datos_extraidos:
                             st.success("✅ Extracción de datos completada")
@@ -806,6 +858,7 @@ def main():
                             resultados_analisis.append({
                                 'archivo': archivo.name,
                                 'datos': datos_extraidos,
+                                'datos_extractor': resultados_extractor,  # ✨ Formato extractor para análisis horizontal/vertical
                                 'resumen': resumen
                             })
                             
@@ -851,11 +904,12 @@ def main():
             st.header("📈 Análisis Consolidado")
             
             # Crear tabs para diferentes vistas
-            tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
+            tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
                 "Resumen General", 
                 "Vista Consolidada (≥2010)", 
                 "Estados Financieros", 
                 "Análisis Vertical", 
+                "Análisis Horizontal",
                 "Comparativo", 
                 "Datos Detallados"
             ])
@@ -1247,7 +1301,241 @@ def main():
                     st.code(traceback.format_exc())
             
             with tab5:
-                st.subheader("📊 Análisis Comparativo (Multi-período)")
+                st.subheader("� Análisis Horizontal Mejorado")
+                st.info("📊 Análisis horizontal año a año (solo formato POST-2010 ≥2010)")
+                
+                try:
+                    # Filtrar solo archivos POST-2010
+                    archivos_post_2010 = [
+                        r for r in resultados_analisis 
+                        if r.get('datos', {}).get('año_documento', 0) >= 2010
+                    ]
+                    
+                    if not archivos_post_2010:
+                        st.warning("⚠️ No hay archivos del formato POST-2010 (≥2010) para análisis horizontal")
+                        st.info("El análisis horizontal solo está disponible para archivos de años 2010 en adelante")
+                    else:
+                        st.success(f"✅ {len(archivos_post_2010)} archivo(s) POST-2010 encontrado(s)")
+                        
+                        # Selector de archivo
+                        opciones_archivos = [r['archivo'] for r in archivos_post_2010]
+                        archivo_seleccionado = st.selectbox(
+                            "Selecciona un archivo para análisis horizontal:",
+                            opciones_archivos,
+                            key="selector_horizontal"
+                        )
+                        
+                        # Obtener resultado seleccionado
+                        resultado_sel = next(r for r in archivos_post_2010 if r['archivo'] == archivo_seleccionado)
+                        datos_extractor = resultado_sel.get('datos_extractor', {})
+                        
+                        if datos_extractor and datos_extractor.get('estados'):
+                            # Realizar análisis horizontal
+                            with st.spinner("Realizando análisis horizontal..."):
+                                analisis_horizontal_resultados = analizador.analizador_horizontal.analizar_desde_extractor(datos_extractor)
+                            
+                            if 'error' in analisis_horizontal_resultados:
+                                st.error(f"❌ {analisis_horizontal_resultados['error']}")
+                            else:
+                                st.success("✅ Análisis horizontal completado")
+                                
+                                # Mostrar información general
+                                col1, col2, col3 = st.columns(3)
+                                with col1:
+                                    st.metric("Empresa", analisis_horizontal_resultados['empresa'])
+                                with col2:
+                                    st.metric("Año Documento", analisis_horizontal_resultados['año_documento'])
+                                with col3:
+                                    st.metric("Estados Analizados", len(analisis_horizontal_resultados['estados_analizados']))
+                                
+                                st.divider()
+                                
+                                # Tabs para cada estado financiero
+                                estados_disponibles = list(analisis_horizontal_resultados['estados_analizados'].keys())
+                                
+                                if estados_disponibles:
+                                    tabs_estados = st.tabs([
+                                        "📊 Estado de Situación Financiera" if 'balance' in estados_disponibles else None,
+                                        "💰 Estado de Resultados" if 'resultados' in estados_disponibles else None,
+                                        "💵 Flujo de Efectivo" if 'flujo' in estados_disponibles else None
+                                    ])
+                                    
+                                    # Estado de Situación Financiera
+                                    if 'balance' in estados_disponibles:
+                                        with tabs_estados[0]:
+                                            balance_ah = analisis_horizontal_resultados['estados_analizados']['balance']
+                                            
+                                            st.write(f"**Año Base:** {balance_ah['año_base']} | **Año Actual:** {balance_ah['año_actual']}")
+                                            st.write(f"**Total Cuentas:** {balance_ah['total_cuentas_analizadas']}")
+                                            
+                                            # Estadísticas
+                                            col1, col2, col3, col4 = st.columns(4)
+                                            stats = balance_ah['estadisticas']
+                                            with col1:
+                                                st.metric("✅ Aumentos", stats['variaciones_positivas'], delta="Positivo")
+                                            with col2:
+                                                st.metric("⬇️ Disminuciones", stats['variaciones_negativas'], delta="Negativo")
+                                            with col3:
+                                                st.metric("➖ Sin Cambio", stats['sin_variacion'])
+                                            with col4:
+                                                st.metric("⚠️ N/A", stats['no_calculables'])
+                                            
+                                            st.divider()
+                                            
+                                            # Tabla de análisis horizontal
+                                            st.write("##### 📊 Análisis Horizontal Detallado")
+                                            
+                                            df_balance = pd.DataFrame(balance_ah['cuentas_analizadas'])
+                                            
+                                            # Formatear DataFrame
+                                            df_display = df_balance.copy()
+                                            df_display['valor_año_base'] = df_display['valor_año_base'].apply(lambda x: f"{x:,.0f}" if pd.notnull(x) else "0")
+                                            df_display['valor_año_actual'] = df_display['valor_año_actual'].apply(lambda x: f"{x:,.0f}" if pd.notnull(x) else "0")
+                                            df_display['variacion_absoluta'] = df_display['variacion_absoluta'].apply(lambda x: f"{x:,.0f}" if pd.notnull(x) else "N/A")
+                                            df_display['analisis_horizontal'] = df_display['analisis_horizontal'].apply(
+                                                lambda x: f"{x:+.2f}%" if pd.notnull(x) else "N/A"
+                                            )
+                                            
+                                            # Renombrar columnas
+                                            df_display = df_display.rename(columns={
+                                                'cuenta': 'Cuenta',
+                                                'valor_año_base': f'Valor {balance_ah["año_base"]}',
+                                                'valor_año_actual': f'Valor {balance_ah["año_actual"]}',
+                                                'variacion_absoluta': 'Variación Absoluta',
+                                                'analisis_horizontal': 'Análisis Horizontal (%)',
+                                                'estado_variacion': 'Estado'
+                                            })
+                                            
+                                            st.dataframe(
+                                                df_display[['Cuenta', f'Valor {balance_ah["año_base"]}', f'Valor {balance_ah["año_actual"]}', 'Variación Absoluta', 'Análisis Horizontal (%)']],
+                                                use_container_width=True,
+                                                height=400
+                                            )
+                                    
+                                    # Estado de Resultados
+                                    if 'resultados' in estados_disponibles:
+                                        tab_idx = 1 if 'balance' in estados_disponibles else 0
+                                        with tabs_estados[tab_idx]:
+                                            resultados_ah = analisis_horizontal_resultados['estados_analizados']['resultados']
+                                            
+                                            st.write(f"**Año Base:** {resultados_ah['año_base']} | **Año Actual:** {resultados_ah['año_actual']}")
+                                            st.write(f"**Total Cuentas:** {resultados_ah['total_cuentas_analizadas']}")
+                                            
+                                            # Estadísticas
+                                            col1, col2, col3, col4 = st.columns(4)
+                                            stats = resultados_ah['estadisticas']
+                                            with col1:
+                                                st.metric("✅ Aumentos", stats['variaciones_positivas'], delta="Positivo")
+                                            with col2:
+                                                st.metric("⬇️ Disminuciones", stats['variaciones_negativas'], delta="Negativo")
+                                            with col3:
+                                                st.metric("➖ Sin Cambio", stats['sin_variacion'])
+                                            with col4:
+                                                st.metric("⚠️ N/A", stats['no_calculables'])
+                                            
+                                            st.divider()
+                                            
+                                            # Tabla de análisis horizontal
+                                            st.write("##### 💰 Análisis Horizontal Detallado")
+                                            
+                                            df_resultados = pd.DataFrame(resultados_ah['cuentas_analizadas'])
+                                            
+                                            # Formatear DataFrame
+                                            df_display = df_resultados.copy()
+                                            df_display['valor_año_base'] = df_display['valor_año_base'].apply(lambda x: f"{x:,.0f}" if pd.notnull(x) else "0")
+                                            df_display['valor_año_actual'] = df_display['valor_año_actual'].apply(lambda x: f"{x:,.0f}" if pd.notnull(x) else "0")
+                                            df_display['variacion_absoluta'] = df_display['variacion_absoluta'].apply(lambda x: f"{x:,.0f}" if pd.notnull(x) else "N/A")
+                                            df_display['analisis_horizontal'] = df_display['analisis_horizontal'].apply(
+                                                lambda x: f"{x:+.2f}%" if pd.notnull(x) else "N/A"
+                                            )
+                                            
+                                            # Renombrar columnas
+                                            df_display = df_display.rename(columns={
+                                                'cuenta': 'Cuenta',
+                                                'valor_año_base': f'Valor {resultados_ah["año_base"]}',
+                                                'valor_año_actual': f'Valor {resultados_ah["año_actual"]}',
+                                                'variacion_absoluta': 'Variación Absoluta',
+                                                'analisis_horizontal': 'Análisis Horizontal (%)',
+                                                'estado_variacion': 'Estado'
+                                            })
+                                            
+                                            st.dataframe(
+                                                df_display[['Cuenta', f'Valor {resultados_ah["año_base"]}', f'Valor {resultados_ah["año_actual"]}', 'Variación Absoluta', 'Análisis Horizontal (%)']],
+                                                use_container_width=True,
+                                                height=400
+                                            )
+                                    
+                                    # Flujo de Efectivo
+                                    if 'flujo' in estados_disponibles:
+                                        tab_idx = 2 if 'balance' in estados_disponibles and 'resultados' in estados_disponibles else (1 if 'balance' in estados_disponibles or 'resultados' in estados_disponibles else 0)
+                                        with tabs_estados[tab_idx]:
+                                            flujo_ah = analisis_horizontal_resultados['estados_analizados']['flujo']
+                                            
+                                            st.write(f"**Año Base:** {flujo_ah['año_base']} | **Año Actual:** {flujo_ah['año_actual']}")
+                                            st.write(f"**Total Cuentas:** {flujo_ah['total_cuentas_analizadas']}")
+                                            
+                                            # Estadísticas
+                                            col1, col2, col3, col4 = st.columns(4)
+                                            stats = flujo_ah['estadisticas']
+                                            with col1:
+                                                st.metric("✅ Aumentos", stats['variaciones_positivas'], delta="Positivo")
+                                            with col2:
+                                                st.metric("⬇️ Disminuciones", stats['variaciones_negativas'], delta="Negativo")
+                                            with col3:
+                                                st.metric("➖ Sin Cambio", stats['sin_variacion'])
+                                            with col4:
+                                                st.metric("⚠️ N/A", stats['no_calculables'])
+                                            
+                                            st.divider()
+                                            
+                                            # Tabla de análisis horizontal
+                                            st.write("##### 💵 Análisis Horizontal Detallado")
+                                            
+                                            df_flujo = pd.DataFrame(flujo_ah['cuentas_analizadas'])
+                                            
+                                            # Formatear DataFrame
+                                            df_display = df_flujo.copy()
+                                            df_display['valor_año_base'] = df_display['valor_año_base'].apply(lambda x: f"{x:,.0f}" if pd.notnull(x) else "0")
+                                            df_display['valor_año_actual'] = df_display['valor_año_actual'].apply(lambda x: f"{x:,.0f}" if pd.notnull(x) else "0")
+                                            df_display['variacion_absoluta'] = df_display['variacion_absoluta'].apply(lambda x: f"{x:,.0f}" if pd.notnull(x) else "N/A")
+                                            df_display['analisis_horizontal'] = df_display['analisis_horizontal'].apply(
+                                                lambda x: f"{x:+.2f}%" if pd.notnull(x) else "N/A"
+                                            )
+                                            
+                                            # Renombrar columnas
+                                            df_display = df_display.rename(columns={
+                                                'cuenta': 'Cuenta',
+                                                'valor_año_base': f'Valor {flujo_ah["año_base"]}',
+                                                'valor_año_actual': f'Valor {flujo_ah["año_actual"]}',
+                                                'variacion_absoluta': 'Variación Absoluta',
+                                                'analisis_horizontal': 'Análisis Horizontal (%)',
+                                                'estado_variacion': 'Estado'
+                                            })
+                                            
+                                            st.dataframe(
+                                                df_display[['Cuenta', f'Valor {flujo_ah["año_base"]}', f'Valor {flujo_ah["año_actual"]}', 'Variación Absoluta', 'Análisis Horizontal (%)']],
+                                                use_container_width=True,
+                                                height=400
+                                            )
+                                
+                                st.divider()
+                                
+                                # Botón de descarga Excel
+                                if st.button("📥 Exportar Análisis Horizontal a Excel", key="btn_export_horizontal"):
+                                    nombre_archivo = f"analisis_horizontal_{archivo_seleccionado.split('.')[0]}.xlsx"
+                                    analizador.analizador_horizontal.exportar_a_excel(analisis_horizontal_resultados, nombre_archivo)
+                                    st.success(f"✅ Archivo exportado: {nombre_archivo}")
+                        
+                        else:
+                            st.warning("⚠️ No hay datos extraídos disponibles para este archivo")
+                
+                except Exception as e:
+                    st.error(f"❌ Error en análisis horizontal: {str(e)}")
+                    import traceback
+                    st.code(traceback.format_exc())
+            
+            with tab6:
+                st.subheader("�📊 Análisis Comparativo (Multi-período)")
                 st.info("Esta sección permite comparar múltiples períodos cuando se cargan varios archivos.")
                 
                 if len(resultados_analisis) > 1:
@@ -1255,7 +1543,7 @@ def main():
                 else:
                     st.warning("⚠️ Carga más de un archivo para habilitar el análisis comparativo")
             
-            with tab6:
+            with tab7:
                 st.subheader("Datos detallados por archivo")
                 
                 for resultado in resultados_analisis:

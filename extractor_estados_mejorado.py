@@ -185,6 +185,10 @@ class ExtractorEstadosFinancieros:
         Returns:
             Dict con estructura completa del estado
         """
+        # ✨ NUEVO: Para Estado de Cambios en Patrimonio, usar extracción especializada
+        if 'PATRIMONIO' in nombre_estado.upper() and 'CAMBIOS' in nombre_estado.upper():
+            return self._extraer_patrimonio_simplificado(tabla, nombre_estado)
+        
         filas = tabla.find_all('tr')
         
         if not filas:
@@ -259,6 +263,94 @@ class ExtractorEstadosFinancieros:
             'años': sorted(años, reverse=True),  # Más reciente primero
             'cuentas': cuentas,
             'total_cuentas': len(cuentas)
+        }
+    
+    def _extraer_patrimonio_simplificado(self, tabla: Tag, nombre_estado: str) -> Dict:
+        """
+        Extrae Estado de Cambios en el Patrimonio mostrando solo 3 columnas:
+        - CCUENTA (código)
+        - Cuenta (descripción)
+        - Total Patrimonio (última columna con valores consolidados)
+        
+        Args:
+            tabla: Tag de BeautifulSoup con la tabla
+            nombre_estado: Nombre del estado
+        
+        Returns:
+            Dict con estructura simplificada del patrimonio
+        """
+        filas = tabla.find_all('tr')
+        
+        if not filas:
+            return {'nombre': nombre_estado, 'años': [], 'cuentas': []}
+        
+        # Analizar header para encontrar columnas
+        header_fila = filas[0]
+        headers = [th.get_text(strip=True) for th in header_fila.find_all('th')]
+        
+        # Identificar índices de columnas
+        idx_ccuenta = None
+        idx_cuenta = None
+        idx_total_patrimonio = None
+        
+        for i, header in enumerate(headers):
+            header_upper = header.upper()
+            if 'CCUENTA' in header_upper:
+                idx_ccuenta = i
+            elif header_upper == 'CUENTA' or 'CUENTA' in header_upper and len(header) < 15:
+                idx_cuenta = i
+            elif 'TOTAL' in header_upper and 'PATRIMONIO' in header_upper:
+                idx_total_patrimonio = i
+        
+        # Si no se encontró "Total Patrimonio", usar la última columna
+        if idx_total_patrimonio is None:
+            idx_total_patrimonio = len(headers) - 1
+        
+        # Por defecto, si no se encuentran, usar posiciones estándar
+        if idx_ccuenta is None:
+            idx_ccuenta = 0
+        if idx_cuenta is None:
+            idx_cuenta = 1
+        
+        # Detectar año del documento (el reporte solo tiene 1 año en patrimonio)
+        año_doc = self.año_documento if self.año_documento else 2024
+        
+        # Extraer datos de las filas
+        cuentas = []
+        for i, fila in enumerate(filas[1:], start=1):
+            celdas = fila.find_all('td')
+            if not celdas or len(celdas) < 3:
+                continue
+            
+            # Extraer CCUENTA, Cuenta y Total Patrimonio
+            ccuenta = celdas[idx_ccuenta].get_text(strip=True) if idx_ccuenta < len(celdas) else ''
+            cuenta = celdas[idx_cuenta].get_text(strip=True) if idx_cuenta < len(celdas) else ''
+            valor_texto = celdas[idx_total_patrimonio].get_text(strip=True) if idx_total_patrimonio < len(celdas) else '0'
+            
+            if not ccuenta and not cuenta:
+                continue
+            
+            # Convertir valor a número
+            valor_numerico = self._convertir_a_numero(valor_texto)
+            
+            # Detectar si es total/subtotal
+            es_total = 'pinta' in celdas[0].get('class', []) or 'SALDOS' in cuenta.upper() or 'TOTAL' in cuenta.upper()
+            
+            cuenta_info = {
+                'ccuenta': ccuenta,
+                'nombre': cuenta,
+                'es_total': es_total,
+                'valores': {año_doc: valor_numerico},  # Solo tiene el año del documento
+                'fila': i
+            }
+            cuentas.append(cuenta_info)
+        
+        return {
+            'nombre': nombre_estado,
+            'años': [año_doc],  # Solo el año del documento
+            'cuentas': cuentas,
+            'total_cuentas': len(cuentas),
+            'columnas_especiales': ['CCUENTA', 'Cuenta', 'Total Patrimonio']  # Metadato
         }
     
     def _convertir_a_numero(self, texto: str) -> float:
