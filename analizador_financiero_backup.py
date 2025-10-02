@@ -9,7 +9,9 @@ from bs4 import BeautifulSoup
 import numpy as np
 import chardet
 from typing import Dict, List, Tuple, Any
-import chardet
+from analisis_vertical_horizontal import AnalisisVerticalHorizontal
+from extractor_estados_mejorado import ExtractorEstadosFinancieros
+from analisis_vertical_mejorado import AnalisisVerticalMejorado
 
 # Configuración de la página
 st.set_page_config(
@@ -24,6 +26,8 @@ class AnalizadorFinanciero:
         self.temp_dir = "temp"
         self.crear_directorio_temporal()
         self.palabras_clave = self.cargar_diccionario_palabras_clave()
+        self.extractor_mejorado = ExtractorEstadosFinancieros()  # ✨ Nuevo extractor mejorado
+        self.analizador_vertical = AnalisisVerticalMejorado()  # ✨ Nuevo analizador vertical
         
     def crear_directorio_temporal(self):
         """Crear directorio temporal para almacenar archivos"""
@@ -92,135 +96,298 @@ class AnalizadorFinanciero:
             return None
     
     def extraer_datos_html(self, archivo_html: str) -> Dict[str, Any]:
-        """Extraer datos importantes del archivo HTML"""
+        """
+        Extraer datos importantes del archivo HTML usando el EXTRACTOR MEJORADO
+        
+        ✨ NUEVO: Usa extractor_estados_mejorado.py para extracción precisa de bloques
+        """
         try:
-            # Detectar codificación automáticamente
-            with open(archivo_html, 'rb') as f:
-                raw_data = f.read()
-                result = chardet.detect(raw_data)
-                codificacion = result['encoding'] or 'latin-1'
+            st.info("🔍 Usando Extractor Mejorado con detección automática de formato...")
             
-            # Leer con la codificación detectada
-            try:
-                with open(archivo_html, 'r', encoding=codificacion) as f:
-                    contenido = f.read()
-                st.info(f"✅ Archivo leído correctamente con codificación: {codificacion}")
-            except:
-                # Si falla, probar con latin-1 como fallback
-                with open(archivo_html, 'r', encoding='latin-1', errors='ignore') as f:
-                    contenido = f.read()
-                st.warning("⚠️ Se usó codificación latin-1 ignorando errores")
+            # Leer archivo HTML
+            with open(archivo_html, 'r', encoding='utf-8', errors='ignore') as f:
+                html_content = f.read()
             
-            # Parsear el HTML
-            soup = BeautifulSoup(contenido, 'html.parser')
+            # ✨ USAR EL NUEVO EXTRACTOR MEJORADO
+            resultados_mejorados = self.extractor_mejorado.extraer_todos_estados(html_content)
             
-            # Detectar estados financieros
-            estados_detectados = self.detectar_estados_financieros(soup)
+            # Mostrar información de extracción
+            año_doc = resultados_mejorados['año_documento']
+            formato = resultados_mejorados['formato']
+            st.success(f"📅 Año detectado: {año_doc} | 📋 Formato: {formato.upper()}")
             
-            # Extraer información general
-            datos_extraidos = {
-                "metadatos": self.extraer_metadatos(soup),
-                "estados_financieros": estados_detectados,
-                "años_disponibles": self.encontrar_años(soup),
-                "cabeceras_columnas": self.extraer_cabeceras_columnas(soup)
-            }
+            # Convertir resultados del nuevo extractor al formato esperado por el resto del código
+            datos_extraidos = self._convertir_formato_mejorado_a_legacy(resultados_mejorados)
             
-            return datos_extraidos
-        except Exception as e:
-            st.error(f"Error al extraer datos del HTML: {str(e)}")
-            return {}
-            soup = BeautifulSoup(contenido, 'html.parser')
+            # Mostrar resumen de extracción
+            if resultados_mejorados['estados']:
+                st.info(f"✅ Estados extraídos: {len(resultados_mejorados['estados'])}")
+                for key, estado in resultados_mejorados['estados'].items():
+                    st.write(f"   📊 {estado['nombre']}: {estado['total_cuentas']} cuentas")
             
-            # Extraer información general
-            datos_extraidos = {
-                "metadatos": self.extraer_metadatos(soup),
-                "activos": self.extraer_categoria_datos(soup, "activos"),
-                "pasivos": self.extraer_categoria_datos(soup, "pasivos"),
-                "patrimonio": self.extraer_categoria_datos(soup, "patrimonio"),
-                "estado_resultados": self.extraer_categoria_datos(soup, "estado_resultados"),
-                "flujo_efectivo": self.extraer_categoria_datos(soup, "flujo_efectivo"),
-                "años_disponibles": self.encontrar_años(soup),
-                "tablas_detectadas": self.detectar_tablas_estados_financieros(soup)
-            }
+            # Mostrar validación de equilibrio
+            if 'equilibrio_contable' in resultados_mejorados['validaciones']:
+                validacion = resultados_mejorados['validaciones']['equilibrio_contable']
+                if validacion['es_valido']:
+                    st.success(f"✅ Equilibrio contable válido (diferencia: {validacion['diferencia']:,.2f})")
+                else:
+                    st.warning(f"⚠️ Equilibrio contable con diferencia de {validacion['diferencia']:,.2f}")
+            
+            # Mostrar errores si los hay
+            if resultados_mejorados['errores']:
+                st.warning("⚠️ Advertencias durante la extracción:")
+                for error in resultados_mejorados['errores']:
+                    st.write(f"   • {error}")
             
             return datos_extraidos
+            
         except Exception as e:
-            st.error(f"Error al extraer datos del HTML: {str(e)}")
+            st.error(f"❌ Error al extraer datos con extractor mejorado: {str(e)}")
+            import traceback
+            st.error(traceback.format_exc())
             return {}
     
+    def _convertir_formato_mejorado_a_legacy(self, resultados_mejorados: Dict) -> Dict[str, Any]:
+        """
+        Convierte el formato del extractor mejorado al formato legacy esperado por el código existente
+        
+        Args:
+            resultados_mejorados: Resultados del extractor mejorado
+            
+        Returns:
+            Dict en formato legacy compatible con analisis_vertical_horizontal.py
+        """
+        año_doc = resultados_mejorados['año_documento']
+        estados_mejorados = resultados_mejorados['estados']
+        metadatos_mejorados = resultados_mejorados.get('metadatos', {})
+        
+        # Crear estructura legacy con metadatos mejorados
+        datos_legacy = {
+            'año_documento': año_doc,
+            'metadatos': {
+                'año': str(año_doc),
+                'formato': resultados_mejorados['formato'],
+                'empresa': metadatos_mejorados.get('empresa', 'No identificada'),
+                'tipo': metadatos_mejorados.get('tipo', 'No especificado'),
+                'periodo': metadatos_mejorados.get('periodo', 'No especificado')
+            },
+            'años_disponibles': [],
+            'estados_financieros': {},
+            'cabeceras_columnas': []
+        }
+        
+        # Extraer años disponibles de las cuentas
+        años_set = set()
+        for estado in estados_mejorados.values():
+            for cuenta in estado['cuentas']:
+                años_set.update(cuenta['valores'].keys())
+        datos_legacy['años_disponibles'] = sorted(años_set, reverse=True)
+        datos_legacy['cabeceras_columnas'] = ['Cuenta', 'NOTA'] + datos_legacy['años_disponibles']
+        
+        # Mapear estados mejorados a formato legacy
+        mapeo_estados = {
+            'balance': 'estado_situacion_financiera' if año_doc >= 2010 else 'balance_general',
+            'resultados': 'estado_resultados' if año_doc >= 2010 else 'estado_ganancias_perdidas',
+            'patrimonio': 'estado_cambios_patrimonio',
+            'flujo': 'estado_flujo_efectivo',
+            'integrales': 'estado_resultados_integrales'
+        }
+        
+        # Convertir cada estado
+        for key_mejorado, nombre_legacy in mapeo_estados.items():
+            if key_mejorado in estados_mejorados:
+                estado_mejorado = estados_mejorados[key_mejorado]
+                
+                # Convertir cuentas al formato legacy
+                cuentas_legacy = []
+                for cuenta in estado_mejorado['cuentas']:
+                    cuenta_legacy = {
+                        'cuenta': cuenta['nombre'],
+                        'es_total': cuenta['es_total']
+                    }
+                    
+                    # Agregar valores por año
+                    for año in datos_legacy['años_disponibles']:
+                        valor = cuenta['valores'].get(año, 0.0)
+                        cuenta_legacy[año] = {
+                            'numero': valor,
+                            'texto': self._formatear_numero(valor)
+                        }
+                    
+                    cuentas_legacy.append(cuenta_legacy)
+                
+                # Agregar estado al diccionario legacy
+                datos_legacy['estados_financieros'][nombre_legacy] = {
+                    'nombre': estado_mejorado['nombre'],
+                    'años': estado_mejorado['años'],
+                    'datos': cuentas_legacy,
+                    'total_cuentas': estado_mejorado['total_cuentas']
+                }
+        
+        return datos_legacy
+    
+    def _formatear_numero(self, valor: float) -> str:
+        """Formatea un número float al formato de texto esperado"""
+        if valor == 0:
+            return '0'
+        elif valor < 0:
+            return f"({abs(valor):,.0f})"
+        else:
+            return f"{valor:,.0f}"
+    
     def extraer_metadatos(self, soup: BeautifulSoup) -> Dict[str, str]:
-        """Extraer metadatos del documento"""
+        """Extraer metadatos del documento - MEJORADO para años ≤2009"""
         metadatos = {}
         
         # Buscar información de la empresa
         texto_completo = soup.get_text().lower()
         
-        # Buscar año
+        # Buscar año - múltiples patrones
         años_encontrados = re.findall(r'\baño:\s*(\d{4})', texto_completo)
+        if not años_encontrados:
+            # Buscar años en divs específicos
+            años_encontrados = re.findall(r'<div>a[ñn]o:\s*(\d{4})', str(soup).lower())
+        if not años_encontrados:
+            # Buscar el primer año que aparezca en el documento
+            años_regex = re.findall(r'\b(19[9]\d|20[0-3]\d)\b', texto_completo)
+            if años_regex:
+                años_encontrados = [años_regex[0]]  # Tomar el primer año encontrado
+        
         if años_encontrados:
             metadatos['año'] = años_encontrados[0]
         
-        # Buscar empresa
-        empresa_match = re.search(r'empresa:\s*([^\n\r]+)', texto_completo)
+        # Buscar empresa - múltiples patrones
+        empresa_match = re.search(r'empresa:\s*([^\n\r<>]+)', texto_completo)
+        if not empresa_match:
+            # Buscar en divs específicos
+            empresa_match = re.search(r'<div>empresa:\s*([^\n\r<>]+)', str(soup).lower())
+        if not empresa_match:
+            # Buscar nombres de empresas típicos
+            empresa_match = re.search(r'(compañ[íi]a\s+[^<>\n\r]+s\.?a\.?)', texto_completo)
+        
         if empresa_match:
             metadatos['empresa'] = empresa_match.group(1).strip()
         
-        # Buscar tipo de reporte
-        tipo_match = re.search(r'tipo:\s*([^\n\r]+)', texto_completo)
+        # Buscar tipo de reporte - múltiples patrones
+        tipo_match = re.search(r'tipo:\s*([^\n\r<>]+)', texto_completo)
+        if not tipo_match:
+            tipo_match = re.search(r'<div>tipo:\s*([^\n\r<>]+)', str(soup).lower())
+        if not tipo_match:
+            # Si encuentra "balance general" o similar, usar como tipo
+            if 'balance general' in texto_completo:
+                metadatos['tipo'] = 'Balance General'
+            elif 'estados financieros' in texto_completo:
+                metadatos['tipo'] = 'Estados Financieros'
+        
         if tipo_match:
             metadatos['tipo'] = tipo_match.group(1).strip()
         
-        # Buscar período
-        periodo_match = re.search(r'período:\s*([^\n\r]+)', texto_completo)
+        # Buscar período - múltiples patrones
+        periodo_match = re.search(r'per[íi]odo:\s*([^\n\r<>]+)', texto_completo)
+        if not periodo_match:
+            periodo_match = re.search(r'<div>per[íi]odo:\s*([^\n\r<>]+)', str(soup).lower())
+        if not periodo_match:
+            # Buscar "anual", "trimestral", etc.
+            if 'anual' in texto_completo:
+                metadatos['periodo'] = 'Anual'
+        
         if periodo_match:
             metadatos['periodo'] = periodo_match.group(1).strip()
         
         return metadatos
     
-    def detectar_estados_financieros(self, soup: BeautifulSoup) -> Dict[str, Dict]:
-        """Detectar y extraer datos por cada estado financiero"""
-        estados_financieros = {
-            "estado_situacion_financiera": {
-                "nombre": "Estado de Situación Financiera",
-                "patrones": [
-                    r"estado\s+de\s+situaci[óo]n\s+financiera",
-                    r"balance\s+general"
-                ],
-                "datos": []
-            },
-            "estado_resultados": {
-                "nombre": "Estado de Resultados",
-                "patrones": [
-                    r"estado\s+de\s+resultados",
-                    r"estado\s+de\s+ganancias\s+y\s+p[ée]rdidas"
-                ],
-                "datos": []
-            },
-            "estado_cambios_patrimonio": {
-                "nombre": "Estado de Cambios en el Patrimonio Neto",
-                "patrones": [
-                    r"estado\s+de\s+cambios\s+en\s+el\s+patrimonio",
-                    r"estado\s+de\s+cambios\s+en\s+el\s+patrimonio\s+neto"
-                ],
-                "datos": []
-            },
-            "estado_flujo_efectivo": {
-                "nombre": "Estado de Flujo de Efectivo",
-                "patrones": [
-                    r"estado\s+de\s+flujo\s+de\s+efectivo",
-                    r"estado\s+de\s+flujos\s+de\s+efectivo"
-                ],
-                "datos": []
-            },
-            "estado_resultados_integrales": {
-                "nombre": "Estado de Resultados Integrales",
-                "patrones": [
-                    r"estado\s+de\s+resultados\s+integrales",
-                    r"estado\s+del\s+resultado\s+integral"
-                ],
-                "datos": []
+    def detectar_estados_financieros(self, soup: BeautifulSoup, año_documento: int = None) -> Dict[str, Dict]:
+        """Detectar y extraer datos por cada estado financiero según el año"""
+        
+        # Detectar año del documento si no se proporciona
+        if año_documento is None:
+            años_encontrados = self.encontrar_años(soup)
+            if años_encontrados:
+                año_documento = int(años_encontrados[0])
+            else:
+                año_documento = 2020  # Por defecto
+        
+        # Definir estados financieros según el año
+        if año_documento <= 2009:
+            # Para años 2009 hacia abajo
+            estados_financieros = {
+                "balance_general": {
+                    "nombre": "Balance General",
+                    "patrones": [
+                        r"balance\s+general",
+                        r"estado\s+de\s+situaci[óo]n\s+financiera"
+                    ],
+                    "datos": []
+                },
+                "estado_ganancias_perdidas": {
+                    "nombre": "Estado de Ganancias y Pérdidas",
+                    "patrones": [
+                        r"estado\s+de\s+ganancias\s+y\s+p[ée]rdidas",
+                        r"estado\s+de\s+resultados"
+                    ],
+                    "datos": []
+                },
+                "estado_cambios_patrimonio": {
+                    "nombre": "Estado de Cambios en el Patrimonio Neto",
+                    "patrones": [
+                        r"estado\s+de\s+cambios\s+en\s+el\s+patrimonio\s+neto",
+                        r"estado\s+de\s+cambios\s+en\s+el\s+patrimonio"
+                    ],
+                    "datos": []
+                },
+                "estado_flujo_efectivo": {
+                    "nombre": "Estado de Flujo de Efectivo",
+                    "patrones": [
+                        r"estado\s+de\s+flujo\s+de\s+efectivo",
+                        r"estado\s+de\s+flujos\s+de\s+efectivo"
+                    ],
+                    "datos": []
+                }
             }
-        }
+        else:
+            # Para años 2010 hacia arriba
+            estados_financieros = {
+                "estado_situacion_financiera": {
+                    "nombre": "Estado de Situación Financiera",
+                    "patrones": [
+                        r"estado\s+de\s+situaci[óo]n\s+financiera",
+                        r"balance\s+general"
+                    ],
+                    "datos": []
+                },
+                "estado_resultados": {
+                    "nombre": "Estado de Resultados",
+                    "patrones": [
+                        r"estado\s+de\s+resultados",
+                        r"estado\s+de\s+ganancias\s+y\s+p[ée]rdidas"
+                    ],
+                    "datos": []
+                },
+                "estado_cambios_patrimonio": {
+                    "nombre": "Estado de Cambios en el Patrimonio Neto",
+                    "patrones": [
+                        r"estados?\s+de\s+cambios\s+en\s+el\s+patrimonio\s+neto",
+                        r"estado\s+de\s+cambios\s+en\s+el\s+patrimonio"
+                    ],
+                    "datos": []
+                },
+                "estado_flujos_efectivo": {
+                    "nombre": "Estado de Flujos de Efectivo",
+                    "patrones": [
+                        r"estado\s+de\s+flujos\s+de\s+efectivo",
+                        r"estado\s+de\s+flujo\s+de\s+efectivo"
+                    ],
+                    "datos": []
+                },
+                "estado_resultados_integrales": {
+                    "nombre": "Estado de Resultados Integrales",
+                    "patrones": [
+                        r"estado\s+de\s+resultados\s+integrales",
+                        r"estado\s+del\s+resultado\s+integral"
+                    ],
+                    "datos": []
+                }
+            }
         
         # Buscar tablas y clasificarlas por estado financiero
         tablas = soup.find_all('table')
@@ -347,122 +514,129 @@ class AnalizadorFinanciero:
         
         return sorted(list(cabeceras_encontradas))
     
-    def extraer_categoria_datos(self, soup: BeautifulSoup, categoria: str) -> List[Dict[str, Any]]:
-        """Extraer datos de una categoría específica"""
-        datos_encontrados = []
-        palabras_categoria = self.palabras_clave.get(categoria, [])
-        
-        # Buscar en todas las tablas
-        tablas = soup.find_all('table')
-        
-        for tabla in tablas:
-            filas = tabla.find_all('tr')
-            
-            for fila in filas:
-                celdas = fila.find_all(['td', 'th'])
-                if len(celdas) >= 2:
-                    texto_cuenta = celdas[0].get_text(strip=True).lower()
-                    
-                    # Verificar si el texto coincide con alguna palabra clave
-                    for palabra in palabras_categoria:
-                        if palabra.lower() in texto_cuenta:
-                            datos_fila = {
-                                'cuenta': celdas[0].get_text(strip=True),
-                                'valores': []
-                            }
-                            
-                            # Extraer valores numéricos
-                            for i in range(1, len(celdas)):
-                                valor_texto = celdas[i].get_text(strip=True)
-                                valor_numerico = self.convertir_a_numero(valor_texto)
-                                datos_fila['valores'].append({
-                                    'texto': valor_texto,
-                                    'numero': valor_numerico
-                                })
-                            
-                            datos_encontrados.append(datos_fila)
-                            break
-        
-        return datos_encontrados
-    
     def convertir_a_numero(self, texto: str) -> float:
-        """Convertir texto a número"""
+        """Convertir texto a número con manejo avanzado de formatos"""
+        if not texto or texto.strip() == '':
+            return 0.0
+        
+        texto_original = texto.strip()
+        
+        # Reemplazar espacios en blanco y guiones por 0
+        if texto_original == '-' or texto_original == '--' or texto_original.isspace():
+            return 0.0
+        
+        # Detectar números negativos en paréntesis
+        es_negativo = False
+        if texto_original.startswith('(') and texto_original.endswith(')'):
+            es_negativo = True
+            texto_original = texto_original[1:-1].strip()
+        
+        # Detectar signo negativo
+        if texto_original.startswith('-'):
+            es_negativo = True
+            texto_original = texto_original[1:].strip()
+        
         try:
-            # Limpiar el texto
-            texto_limpio = re.sub(r'[^\d.,\-]', '', texto)
-            texto_limpio = texto_limpio.replace(',', '')
+            # Remover símbolos de moneda comunes
+            texto_limpio = re.sub(r'[S/\$€£¥₹]', '', texto_original)
             
+            # Remover espacios y otros caracteres no numéricos excepto punto, coma y guión
+            texto_limpio = re.sub(r'[^\d.,\-]', '', texto_limpio)
+            
+            # FORMATO PERUANO/LATINOAMERICANO:
+            # - Comas (,) = separadores de miles: 123,456 = 123456
+            # - Puntos (.) = separadores decimales: 123.50 = 123.5
+            
+            # Caso 1: Número con comas y punto (ej: 1,234,567.89)
+            if ',' in texto_limpio and '.' in texto_limpio:
+                # Verificar que el punto esté al final para decimales
+                partes = texto_limpio.split('.')
+                if len(partes) == 2 and len(partes[1]) <= 3:  # Máximo 3 decimales
+                    parte_entera = partes[0].replace(',', '')  # Remover comas de miles
+                    parte_decimal = partes[1]
+                    texto_limpio = f"{parte_entera}.{parte_decimal}"
+                else:
+                    # Si hay múltiples puntos, tratar todo como entero
+                    texto_limpio = texto_limpio.replace(',', '').replace('.', '')
+            
+            # Caso 2: Solo comas (ej: 123,456 = 123456)
+            elif ',' in texto_limpio and '.' not in texto_limpio:
+                texto_limpio = texto_limpio.replace(',', '')
+            
+            # Caso 3: Solo punto (ej: 123.45 = 123.45)
+            elif '.' in texto_limpio and ',' not in texto_limpio:
+                # Verificar si es decimal válido
+                partes = texto_limpio.split('.')
+                if len(partes) == 2 and len(partes[1]) <= 3:
+                    # Es decimal, mantener como está
+                    pass
+                else:
+                    # Múltiples puntos o formato inválido, remover puntos
+                    texto_limpio = texto_limpio.replace('.', '')
+            
+            # Caso 4: Solo números (ya está limpio)
+            
+            # Convertir a float
             if texto_limpio:
-                return float(texto_limpio)
+                numero = float(texto_limpio)
+                return -numero if es_negativo else numero
             else:
                 return 0.0
-        except:
-            return 0.0
+                
+        except (ValueError, TypeError):
+            # Si falla la conversión, intentar extraer solo los dígitos
+            try:
+                digitos = re.findall(r'\d', texto_original)
+                if digitos:
+                    numero = float(''.join(digitos))
+                    return -numero if es_negativo else numero
+                else:
+                    return 0.0
+            except:
+                return 0.0
     
     def encontrar_años(self, soup: BeautifulSoup) -> List[str]:
-        """Encontrar los años disponibles en el documento"""
+        """Encontrar los años disponibles en el documento - MEJORADO para años ≤2009"""
         años_encontrados = set()
         
-        # Buscar en el texto completo
+        # Buscar en el texto completo usando regex más flexible
         texto = soup.get_text()
-        for año in self.palabras_clave["años"]:
-            if año in texto:
-                años_encontrados.add(año)
         
-        # Buscar en headers de tablas
+        # Buscar años de 1990 a 2030 (rango amplio)
+        import re
+        años_regex = re.findall(r'\b(19[9]\d|20[0-3]\d)\b', texto)
+        for año in años_regex:
+            años_encontrados.add(año)
+        
+        # Buscar específicamente en headers de tablas con mayor precisión
         headers = soup.find_all(['th', 'td'])
         for header in headers:
             texto_header = header.get_text(strip=True)
+            
+            # Buscar años específicos en headers
+            años_en_header = re.findall(r'\b(19[9]\d|20[0-3]\d)\b', texto_header)
+            for año in años_en_header:
+                años_encontrados.add(año)
+            
+            # También buscar años exactos de la lista predefinida
             for año in self.palabras_clave["años"]:
                 if año == texto_header:
                     años_encontrados.add(año)
         
-        return sorted(list(años_encontrados), reverse=True)
-    
-    def detectar_tablas_estados_financieros(self, soup: BeautifulSoup) -> List[Dict[str, Any]]:
-        """Detectar y clasificar las tablas de estados financieros"""
-        tablas_detectadas = []
-        tablas = soup.find_all('table')
+        # Filtrar años razonables (1990-2024) - excluir años futuros
+        import datetime
+        año_actual = datetime.datetime.now().year
         
-        estados_financieros = [
-            "estado de situación financiera",
-            "balance general",
-            "estado de resultados",
-            "estado de ganancias y pérdidas",
-            "estado de flujo de efectivo",
-            "estado de cambios en el patrimonio"
-        ]
+        años_filtrados = []
+        for año_str in años_encontrados:
+            try:
+                año_num = int(año_str)
+                if 1990 <= año_num <= año_actual:
+                    años_filtrados.append(año_str)
+            except:
+                continue
         
-        for i, tabla in enumerate(tablas):
-            # Buscar el contexto antes de la tabla
-            texto_previo = ""
-            elemento_previo = tabla.find_previous(['h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'span', 'div'])
-            if elemento_previo:
-                texto_previo = elemento_previo.get_text().lower().strip()
-            
-            # Clasificar la tabla
-            tipo_estado = "no identificado"
-            for estado in estados_financieros:
-                if estado in texto_previo:
-                    tipo_estado = estado
-                    break
-            
-            # Contar filas y columnas
-            filas = tabla.find_all('tr')
-            num_filas = len(filas)
-            num_columnas = 0
-            if filas:
-                num_columnas = len(filas[0].find_all(['td', 'th']))
-            
-            tablas_detectadas.append({
-                'indice': i,
-                'tipo_estado': tipo_estado,
-                'num_filas': num_filas,
-                'num_columnas': num_columnas,
-                'texto_contexto': texto_previo[:100]  # Primeros 100 caracteres
-            })
-        
-        return tablas_detectadas
+        return sorted(list(set(años_filtrados)), reverse=True)
     
     def generar_resumen_analisis(self, datos_extraidos: Dict[str, Any]) -> Dict[str, Any]:
         """Generar un resumen del análisis realizado"""
@@ -554,15 +728,21 @@ def main():
                             with col3:
                                 st.metric("Datos extraídos", resumen['total_datos_extraidos'])
                             
-                            # Mostrar categorías encontradas
-                            if resumen['categorias_encontradas']:
-                                st.write("**Categorías financieras detectadas:**")
-                                st.write(", ".join(resumen['categorias_encontradas']))
+                            # Mostrar estados encontrados
+                            if resumen['estados_encontrados']:
+                                st.write("**Estados financieros detectados:**")
+                                for estado in resumen['estados_encontrados']:
+                                    st.write(f"- {estado}")
                             
                             # Mostrar años disponibles
                             if resumen['años_disponibles']:
                                 st.write("**Años disponibles:**")
                                 st.write(", ".join(resumen['años_disponibles']))
+                            
+                            # Mostrar cabeceras disponibles
+                            if resumen['cabeceras_disponibles']:
+                                st.write("**Cabeceras de columnas detectadas:**")
+                                st.write(", ".join(resumen['cabeceras_disponibles'][:10]))  # Mostrar solo las primeras 10
                         
                         else:
                             st.error("❌ Error al extraer datos del archivo")
@@ -578,7 +758,7 @@ def main():
             st.header("📈 Análisis Consolidado")
             
             # Crear tabs para diferentes vistas
-            tab1, tab2, tab3, tab4 = st.tabs(["Resumen General", "Datos por Categoría", "Comparativo", "Datos Detallados"])
+            tab1, tab2, tab3, tab4, tab5 = st.tabs(["Resumen General", "Estados Financieros", "Análisis Vertical", "Comparativo", "Datos Detallados"])
             
             with tab1:
                 st.subheader("Resumen de todos los archivos procesados")
@@ -592,53 +772,323 @@ def main():
                         'Año': resultado['resumen']['año_reporte'],
                         'Tipo': resultado['resumen']['tipo_reporte'],
                         'Datos Extraídos': resultado['resumen']['total_datos_extraidos'],
-                        'Categorías': len(resultado['resumen']['categorias_encontradas'])
+                        'Estados Detectados': len(resultado['resumen']['estados_encontrados'])
                     })
                 
                 df_resumen = pd.DataFrame(datos_resumen)
                 st.dataframe(df_resumen, use_container_width=True)
             
             with tab2:
-                st.subheader("Datos organizados por categoría financiera")
+                st.subheader("Datos organizados por estado financiero")
                 
                 for resultado in resultados_analisis:
-                    st.write(f"### {resultado['archivo']}")
+                    st.write(f"### 📄 {resultado['archivo']}")
+                    año_doc = resultado['datos'].get('año_documento', 2020)
+                    st.write(f"**Año del documento:** {año_doc}")
                     
-                    datos = resultado['datos']
+                    if año_doc <= 2009:
+                        st.info("📅 Formato aplicable para años 2009 hacia abajo")
+                    else:
+                        st.info("📅 Formato aplicable para años 2010 hacia arriba")
                     
-                    # Mostrar cada categoría
-                    for categoria in ['activos', 'pasivos', 'patrimonio', 'estado_resultados']:
-                        if categoria in datos and datos[categoria]:
-                            st.write(f"**{categoria.replace('_', ' ').title()}:**")
+                    estados_financieros = resultado['datos'].get('estados_financieros', {})
+                    
+                    if not estados_financieros:
+                        st.warning("No se detectaron estados financieros en este archivo")
+                        continue
+                    
+                    for clave_estado, info_estado in estados_financieros.items():
+                        if info_estado.get('datos'):
+                            st.write(f"#### 📋 {info_estado['nombre']}")
                             
-                            categoria_df = []
-                            for item in datos[categoria]:
-                                fila = {'Cuenta': item['cuenta']}
-                                for i, valor in enumerate(item['valores']):
-                                    fila[f'Valor_{i+1}'] = valor['texto']
-                                categoria_df.append(fila)
+                            # Convertir datos a DataFrame
+                            datos_estado = []
+                            for item in info_estado['datos']:
+                                fila = {'Cuenta': item.get('cuenta', 'Sin cuenta')}
+                                
+                                # Agregar todas las columnas que no sean 'cuenta'
+                                for clave, valor in item.items():
+                                    if clave != 'cuenta':
+                                        if isinstance(valor, dict):
+                                            # Mostrar tanto el texto original como el número convertido
+                                            texto_original = valor.get('texto', '')
+                                            numero_convertido = valor.get('numero', 0)
+                                            
+                                            # Si el texto original es diferente del número, mostrar ambos
+                                            if texto_original and str(numero_convertido) != texto_original:
+                                                fila[f"{clave}_Original"] = texto_original
+                                                fila[f"{clave}_Numérico"] = numero_convertido
+                                            else:
+                                                fila[clave] = numero_convertido if numero_convertido != 0 else (texto_original or '-')
+                                        else:
+                                            fila[clave] = valor if valor else '-'
+                                
+                                datos_estado.append(fila)
                             
-                            if categoria_df:
-                                df_categoria = pd.DataFrame(categoria_df)
-                                st.dataframe(df_categoria, use_container_width=True)
+                            if datos_estado:
+                                df_estado = pd.DataFrame(datos_estado)
+                                
+                                # Formatear números para mejor visualización
+                                for col in df_estado.columns:
+                                    if 'Numérico' in col or df_estado[col].dtype in ['float64', 'int64']:
+                                        try:
+                                            df_estado[col] = df_estado[col].apply(lambda x: f"{x:,.2f}" if isinstance(x, (int, float)) and x != 0 else (x if x != 0 else '-'))
+                                        except:
+                                            pass
+                                
+                                st.dataframe(df_estado, use_container_width=True)
+                                
+                                # Mostrar estadísticas básicas
+                                st.write(f"**Total de cuentas detectadas:** {len(datos_estado)}")
+                            else:
+                                st.info("No se encontraron datos para este estado financiero")
+                        else:
+                            st.write(f"#### 📋 {info_estado['nombre']}")
+                            st.info("No se encontraron datos para este estado financiero")
+                    
+                    st.divider()
             
             with tab3:
-                st.subheader("Análisis comparativo entre períodos")
+                st.subheader("📊 Análisis Vertical Mejorado")
+                
+                try:
+                    for resultado in resultados_analisis:
+                        st.write(f"### 📄 {resultado['archivo']}")
+                        
+                        # Leer el archivo HTML original para análisis
+                        ruta_html = os.path.join(analizador.temp_dir, resultado['archivo'].replace('.xls', '.html').replace('.xlsx', '.html'))
+                        
+                        if os.path.exists(ruta_html):
+                            with open(ruta_html, 'r', encoding='utf-8', errors='ignore') as f:
+                                html_content = f.read()
+                            
+                            # Extraer estados con el extractor mejorado
+                            with st.spinner("Extrayendo estados financieros..."):
+                                resultados_extractor = analizador.extractor_mejorado.extraer_todos_estados(html_content)
+                            
+                            # Mostrar metadatos
+                            metadatos = resultados_extractor.get('metadatos', {})
+                            col1, col2, col3, col4 = st.columns(4)
+                            
+                            with col1:
+                                st.metric("🏢 Empresa", metadatos.get('empresa', 'N/A'))
+                            with col2:
+                                st.metric("📅 Año", resultados_extractor['año_documento'])
+                            with col3:
+                                st.metric("📋 Tipo", metadatos.get('tipo', 'N/A'))
+                            with col4:
+                                formato_txt = "Pre-2010 (PCG)" if resultados_extractor['formato'] == 'pre_2010' else "Post-2010 (NIIF)"
+                                st.metric("📊 Formato", formato_txt)
+                            
+                            # Realizar análisis vertical
+                            with st.spinner("Realizando análisis vertical..."):
+                                analisis_vertical = analizador.analizador_vertical.analizar_desde_extractor(resultados_extractor)
+                            
+                            st.success("✅ Análisis vertical completado")
+                            
+                            # Mostrar resumen
+                            resumen = analisis_vertical.get('resumen', {})
+                            st.info(f"📊 Total de estados analizados: {resumen.get('total_estados_analizados', 0)}")
+                            
+                            estados_analizados = analisis_vertical.get('estados_analizados', {})
+                            
+                            # TAB para cada estado financiero
+                            tabs_estados = []
+                            if 'balance' in estados_analizados:
+                                tabs_estados.append("Balance/Situación Financiera")
+                            if 'resultados' in estados_analizados:
+                                tabs_estados.append("Estado de Resultados")
+                            if 'flujo' in estados_analizados:
+                                tabs_estados.append("Flujo de Efectivo")
+                            
+                            if tabs_estados:
+                                tabs_sub = st.tabs(tabs_estados)
+                                tab_idx = 0
+                                
+                                # Balance / Situación Financiera
+                                if 'balance' in estados_analizados:
+                                    with tabs_sub[tab_idx]:
+                                        balance_data = estados_analizados['balance']
+                                        st.write(f"#### 💰 {balance_data['nombre_estado']}")
+                                        st.write(f"**Año analizado:** {balance_data['año_analisis']}")
+                                        
+                                        # Métricas principales
+                                        col1, col2, col3 = st.columns(3)
+                                        with col1:
+                                            st.metric("Total Activos", f"{balance_data['total_activos']:,.0f}")
+                                        with col2:
+                                            st.metric("Total Pasivos", f"{balance_data['total_pasivos']:,.0f}")
+                                        with col3:
+                                            patrimonio = balance_data['total_activos'] - balance_data['total_pasivos']
+                                            st.metric("Patrimonio", f"{patrimonio:,.0f}")
+                                        
+                                        # ACTIVOS
+                                        if balance_data['activos']:
+                                            st.write("##### 📊 ACTIVOS - Análisis Vertical")
+                                            st.caption("*Cada cuenta como % del Total de Activos*")
+                                            
+                                            df_activos = pd.DataFrame(balance_data['activos'])
+                                            df_activos['Valor'] = df_activos['valor'].apply(lambda x: f"{x:,.0f}")
+                                            df_activos['% Vertical'] = df_activos['porcentaje'].apply(lambda x: f"{x:.2f}%")
+                                            
+                                            df_mostrar = df_activos[['cuenta', 'Valor', '% Vertical']].copy()
+                                            df_mostrar.columns = ['Cuenta', 'Valor', '% del Total Activos']
+                                            
+                                            st.dataframe(df_mostrar, use_container_width=True, height=400)
+                                            
+                                            # Gráfico de barras de principales activos
+                                            st.write("**Top 10 Activos por Participación:**")
+                                            df_chart = df_activos.nlargest(10, 'porcentaje')
+                                            if not df_chart.empty:
+                                                chart_data = df_chart.set_index('cuenta')['porcentaje']
+                                                st.bar_chart(chart_data)
+                                        
+                                        # PASIVOS
+                                        if balance_data['pasivos']:
+                                            st.write("##### 💳 PASIVOS - Análisis Vertical")
+                                            st.caption("*Cada cuenta como % del Total de Pasivos*")
+                                            
+                                            df_pasivos = pd.DataFrame(balance_data['pasivos'])
+                                            df_pasivos['Valor'] = df_pasivos['valor'].apply(lambda x: f"{x:,.0f}")
+                                            df_pasivos['% Vertical'] = df_pasivos['porcentaje'].apply(lambda x: f"{x:.2f}%")
+                                            
+                                            df_mostrar_p = df_pasivos[['cuenta', 'Valor', '% Vertical']].copy()
+                                            df_mostrar_p.columns = ['Cuenta', 'Valor', '% del Total Pasivos']
+                                            
+                                            st.dataframe(df_mostrar_p, use_container_width=True, height=400)
+                                            
+                                            # Gráfico de barras de principales pasivos
+                                            st.write("**Top 10 Pasivos por Participación:**")
+                                            df_chart_p = df_pasivos.nlargest(10, 'porcentaje')
+                                            if not df_chart_p.empty:
+                                                chart_data_p = df_chart_p.set_index('cuenta')['porcentaje']
+                                                st.bar_chart(chart_data_p)
+                                        
+                                        st.info(f"⚠️ PATRIMONIO: No se calcula análisis vertical (según especificación)")
+                                    
+                                    tab_idx += 1
+                                
+                                # Estado de Resultados
+                                if 'resultados' in estados_analizados:
+                                    with tabs_sub[tab_idx]:
+                                        resultados_data = estados_analizados['resultados']
+                                        st.write(f"#### 📈 {resultados_data['nombre_estado']}")
+                                        st.write(f"**Año analizado:** {resultados_data['año_analisis']}")
+                                        
+                                        # Métrica principal
+                                        st.metric("Total Ingresos (Base)", f"{resultados_data['total_ingresos']:,.0f}")
+                                        
+                                        if resultados_data['cuentas_analizadas']:
+                                            st.write("##### 📊 Análisis Vertical")
+                                            st.caption("*Cada cuenta como % del Total de Ingresos*")
+                                            
+                                            df_resultados = pd.DataFrame(resultados_data['cuentas_analizadas'])
+                                            df_resultados['Valor'] = df_resultados['valor'].apply(lambda x: f"{x:,.0f}")
+                                            df_resultados['% Vertical'] = df_resultados['porcentaje'].apply(lambda x: f"{x:.2f}%")
+                                            
+                                            df_mostrar_r = df_resultados[['cuenta', 'Valor', '% Vertical']].copy()
+                                            df_mostrar_r.columns = ['Cuenta', 'Valor', '% de Ingresos']
+                                            
+                                            st.dataframe(df_mostrar_r, use_container_width=True, height=400)
+                                            
+                                            # Gráfico de composición
+                                            st.write("**Composición del Estado de Resultados:**")
+                                            df_chart_r = df_resultados[df_resultados['porcentaje'].abs() > 1]  # Solo > 1%
+                                            if not df_chart_r.empty:
+                                                chart_data_r = df_chart_r.set_index('cuenta')['porcentaje']
+                                                st.bar_chart(chart_data_r)
+                                    
+                                    tab_idx += 1
+                                
+                                # Flujo de Efectivo
+                                if 'flujo' in estados_analizados:
+                                    with tabs_sub[tab_idx]:
+                                        flujo_data = estados_analizados['flujo']
+                                        st.write(f"#### 💵 {flujo_data['nombre_estado']}")
+                                        st.write(f"**Año analizado:** {flujo_data['año_analisis']}")
+                                        
+                                        # Métrica principal
+                                        st.metric("Flujo Neto (Base)", f"{flujo_data['flujo_neto']:,.0f}")
+                                        
+                                        if flujo_data['cuentas_analizadas']:
+                                            st.write("##### 📊 Análisis Vertical")
+                                            st.caption("*Cada cuenta como % del Flujo Neto*")
+                                            
+                                            df_flujo = pd.DataFrame(flujo_data['cuentas_analizadas'])
+                                            df_flujo['Valor'] = df_flujo['valor'].apply(lambda x: f"{x:,.0f}")
+                                            df_flujo['% Vertical'] = df_flujo['porcentaje'].apply(lambda x: f"{x:.2f}%")
+                                            
+                                            df_mostrar_f = df_flujo[['cuenta', 'Valor', '% Vertical']].copy()
+                                            df_mostrar_f.columns = ['Cuenta', 'Valor', '% del Flujo Neto']
+                                            
+                                            st.dataframe(df_mostrar_f, use_container_width=True, height=400)
+                            
+                            # Botón de exportación a Excel
+                            st.write("---")
+                            nombre_base = resultado['archivo'].split('.')[0]
+                            archivo_excel = f"analisis_vertical_{nombre_base}.xlsx"
+                            
+                            if st.button(f"📥 Exportar a Excel: {archivo_excel}", key=f"export_{resultado['archivo']}"):
+                                analizador.analizador_vertical.exportar_a_excel(analisis_vertical, archivo_excel)
+                                st.success(f"✅ Archivo exportado: {archivo_excel}")
+                                
+                                # Ofrecer descarga
+                                with open(archivo_excel, 'rb') as f:
+                                    st.download_button(
+                                        label="⬇️ Descargar Excel",
+                                        data=f.read(),
+                                        file_name=archivo_excel,
+                                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                                        key=f"download_{resultado['archivo']}"
+                                    )
+                        
+                        else:
+                            st.warning(f"❌ No se encontró el archivo HTML: {ruta_html}")
+                        
+                        st.divider()
+                    
+                except Exception as e:
+                    st.error(f"❌ Error en análisis vertical: {str(e)}")
+                    import traceback
+                    st.code(traceback.format_exc())
+            
+            with tab4:
+                st.subheader("📊 Análisis Comparativo (Multi-período)")
+                st.info("Esta sección permite comparar múltiples períodos cuando se cargan varios archivos.")
                 
                 if len(resultados_analisis) > 1:
-                    st.info("Comparación disponible entre múltiples archivos")
+                    st.success(f"✅ {len(resultados_analisis)} archivos disponibles para comparación")
+                else:
+                    st.warning("� Carga más de un archivo para habilitar el análisis comparativo")
+            
+            with tab5:
                     
-                    # Aquí se podría implementar lógica de comparación
-                    empresas = set([r['resumen']['empresa'] for r in resultados_analisis])
-                    años = set([r['resumen']['año_reporte'] for r in resultados_analisis])
+                    # Crear tabla comparativa
+                    datos_comparativos = []
+                    for resultado in resultados_analisis:
+                        fila_comparativa = {
+                            'Archivo': resultado['archivo'],
+                            'Empresa': resultado['resumen']['empresa'],
+                            'Año': resultado['resumen']['año_reporte'],
+                            'Total_Datos': resultado['resumen']['total_datos_extraidos']
+                        }
+                        
+                        # Agregar estados detectados
+                        estados_financieros = resultado['datos'].get('estados_financieros', {})
+                        for clave_estado, info_estado in estados_financieros.items():
+                            nombre_col = info_estado['nombre'].replace(' ', '_')
+                            fila_comparativa[nombre_col] = len(info_estado.get('datos', []))
+                        
+                        datos_comparativos.append(fila_comparativa)
                     
-                    st.write(f"**Empresas analizadas:** {len(empresas)}")
-                    st.write(f"**Años cubiertos:** {sorted(años, reverse=True)}")
+                    if datos_comparativos:
+                        df_comparativo = pd.DataFrame(datos_comparativos)
+                        st.dataframe(df_comparativo, use_container_width=True)
                 
                 else:
                     st.info("Sube más de un archivo para realizar comparaciones")
             
-            with tab4:
+            with tab5:
                 st.subheader("Datos detallados por archivo")
                 
                 for resultado in resultados_analisis:
@@ -659,20 +1109,24 @@ def main():
                     'tipo': resultado['resumen']['tipo_reporte']
                 }
                 
-                # Agregar datos por categoría
-                for categoria in ['activos', 'pasivos', 'patrimonio', 'estado_resultados']:
-                    if categoria in resultado['datos']:
-                        for item in resultado['datos'][categoria]:
-                            row = base_row.copy()
-                            row['categoria'] = categoria
-                            row['cuenta'] = item['cuenta']
-                            
-                            # Agregar valores
-                            for i, valor in enumerate(item['valores']):
-                                row[f'valor_{i+1}'] = valor['numero']
-                                row[f'valor_texto_{i+1}'] = valor['texto']
-                            
-                            datos_exportar.append(row)
+                # Agregar datos por estado financiero
+                estados_financieros = resultado['datos'].get('estados_financieros', {})
+                for clave_estado, info_estado in estados_financieros.items():
+                    for item in info_estado.get('datos', []):
+                        row = base_row.copy()
+                        row['estado_financiero'] = info_estado['nombre']
+                        row['cuenta'] = item.get('cuenta', '')
+                        
+                        # Agregar todas las columnas
+                        for clave, valor in item.items():
+                            if clave != 'cuenta':
+                                if isinstance(valor, dict):
+                                    row[f'{clave}_texto'] = valor.get('texto', '')
+                                    row[f'{clave}_numero'] = valor.get('numero', 0)
+                                else:
+                                    row[clave] = valor
+                        
+                        datos_exportar.append(row)
             
             if datos_exportar:
                 df_exportar = pd.DataFrame(datos_exportar)
@@ -690,14 +1144,38 @@ def main():
     else:
         st.info("👆 Sube uno o más archivos XLS para comenzar el análisis")
         
-        # Mostrar información sobre el diccionario de palabras clave
-        with st.expander("📚 Ver diccionario de palabras clave utilizadas"):
-            st.write("El sistema utiliza las siguientes palabras clave para identificar datos importantes:")
+        # Mostrar información sobre los estados financieros detectados
+        with st.expander("📚 Estados financieros que se pueden detectar"):
+            st.write("""
+            El sistema puede identificar y analizar los siguientes estados financieros:
             
-            for categoria, palabras in analizador.palabras_clave.items():
-                st.write(f"**{categoria.replace('_', ' ').title()}:**")
-                st.write(", ".join(palabras))
-                st.write("")
+            - **Estado de Situación Financiera** (Balance General)
+            - **Estado de Resultados** (Estado de Ganancias y Pérdidas)
+            - **Estado de Cambios en el Patrimonio Neto**
+            - **Estado de Flujo de Efectivo**
+            - **Estado de Resultados Integrales**
+            
+            El sistema detecta automáticamente el tipo de estado financiero basado en:
+            - Títulos y encabezados en el documento
+            - Contexto de las tablas
+            - Patrones de texto característicos
+            """)
+        
+        # Mostrar información sobre las cabeceras
+        with st.expander("🏷️ Manejo de cabeceras de columnas"):
+            st.write("""
+            El sistema identifica automáticamente las cabeceras de las columnas:
+            
+            - **Años**: 2024, 2023, 2022, etc.
+            - **Notas**: Referencias a notas explicativas
+            - **Descripciones**: Cuenta, Descripción, etc.
+            - **Valores**: Importes en diferentes monedas
+            
+            Las cabeceras se extraen de:
+            - Elementos `<th>` en las tablas HTML
+            - Primera fila de datos cuando no hay `<th>`
+            - Detección inteligente de años y términos financieros
+            """)
 
 if __name__ == "__main__":
     main()
