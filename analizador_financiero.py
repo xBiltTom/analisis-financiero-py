@@ -16,6 +16,7 @@ from analisis_horizontal_mejorado import AnalisisHorizontalMejorado
 from analisis_vertical_consolidado import AnalisisVerticalConsolidado
 from analisis_horizontal_consolidado import AnalisisHorizontalConsolidado
 from ratios_financieros import CalculadorRatiosFinancieros
+from groq import Groq
 
 # Configuración de la página
 st.set_page_config(
@@ -24,6 +25,200 @@ st.set_page_config(
     layout="wide",
     initial_sidebar_state="expanded"
 )
+
+def analizar_ratios_con_ia(resultados_ratios: Dict[str, Any], empresa: str) -> str:
+    """
+    Analiza los ratios financieros usando el modelo de IA de Groq en 3 solicitudes especializadas
+    
+    Args:
+        resultados_ratios: Diccionario con los ratios calculados
+        empresa: Nombre de la empresa
+    
+    Returns:
+        str: Análisis completo generado por la IA (combinación de 3 análisis)
+    """
+    try:
+        # Inicializar cliente Groq con API key
+        client = Groq(api_key="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")
+        
+        # Preparar datos de ratios
+        años = sorted(resultados_ratios['años'])
+        ratios_por_año = resultados_ratios['ratios_por_año']
+        
+        # ==================== SOLICITUD 1: LIQUIDEZ Y ENDEUDAMIENTO ====================
+        prompt1 = f"""Eres un analista financiero experto. Analiza ÚNICAMENTE los ratios de LIQUIDEZ y ENDEUDAMIENTO de {empresa}.
+
+**EMPRESA:** {empresa}
+**AÑOS:** {', '.join(map(str, años))}
+
+**DATOS DE LIQUIDEZ Y ENDEUDAMIENTO:**
+"""
+        for año in años:
+            ratios = ratios_por_año[año]
+            prompt1 += f"\n**{año}:**\n"
+            prompt1 += f"• Liquidez Corriente: {ratios.get('liquidez_corriente', 'N/A')}\n"
+            prompt1 += f"• Prueba Ácida: {ratios.get('prueba_acida', 'N/A')}\n"
+            prompt1 += f"• Razón Deuda Total: {ratios.get('razon_deuda_total', 'N/A')}\n"
+            prompt1 += f"• Razón Deuda/Patrimonio: {ratios.get('razon_deuda_patrimonio', 'N/A')}\n"
+        
+        prompt1 += """
+**INSTRUCCIONES:**
+- Analiza SOLO liquidez y endeudamiento (NO menciones rentabilidad ni actividad)
+- Sé específico con los números y proporciona análisis DETALLADO
+- Identifica tendencias, alertas y explica sus causas probables
+- Proporciona contexto comparativo entre años
+- Máximo 15-18 líneas
+
+**ESTRUCTURA:**
+1. **LIQUIDEZ** (8-9 líneas): Analiza Liquidez Corriente y Prueba Ácida. ¿Puede pagar obligaciones a corto plazo? ¿Cómo ha evolucionado? ¿Qué significa cada cambio? ¿Es saludable para la industria?
+2. **ENDEUDAMIENTO** (7-9 líneas): Analiza Razón Deuda Total y Deuda/Patrimonio. ¿Nivel de riesgo? ¿Apalancamiento adecuado? ¿Tendencia? ¿Cómo afecta la capacidad de endeudamiento futuro? ¿Alertas específicas?
+"""
+        
+        # ==================== SOLICITUD 2: RENTABILIDAD Y ACTIVIDAD ====================
+        prompt2 = f"""Eres un analista financiero experto. Analiza ÚNICAMENTE los ratios de RENTABILIDAD y ACTIVIDAD de {empresa}.
+
+**EMPRESA:** {empresa}
+**AÑOS:** {', '.join(map(str, años))}
+
+**DATOS DE RENTABILIDAD Y ACTIVIDAD:**
+"""
+        for año in años:
+            ratios = ratios_por_año[año]
+            prompt2 += f"\n**{año}:**\n"
+            prompt2 += f"• Margen Neto: {ratios.get('margen_neto', 'N/A')}\n"
+            prompt2 += f"• ROA: {ratios.get('roa', 'N/A')}\n"
+            prompt2 += f"• ROE: {ratios.get('roe', 'N/A')}\n"
+            prompt2 += f"• Rotación Activos Totales: {ratios.get('rotacion_activos_totales', 'N/A')}\n"
+            prompt2 += f"• Rotación CxC: {ratios.get('rotacion_cuentas_cobrar', 'N/A')}\n"
+            prompt2 += f"• Rotación Inventarios: {ratios.get('rotacion_inventarios', 'N/A')}\n"
+        
+        prompt2 += """
+**INSTRUCCIONES:**
+- Analiza SOLO rentabilidad y actividad (NO menciones liquidez ni endeudamiento)
+- Sé específico con los números y proporciona análisis DETALLADO
+- Identifica si genera valor para accionistas y explica por qué
+- Compara entre años y explica cambios significativos
+- Máximo 18-20 líneas
+
+**ESTRUCTURA:**
+1. **RENTABILIDAD** (9-10 líneas): Analiza Margen Neto, ROA y ROE. ¿Genera ganancias suficientes? ¿Cómo ha evolucionado cada indicador? ¿El retorno es adecuado para los accionistas? ¿Qué factores pueden estar influyendo? ¿Comparación con tendencias del sector?
+2. **EFICIENCIA OPERATIVA** (9-10 líneas): Analiza rotaciones de activos, CxC e inventarios. ¿Uso eficiente de recursos? ¿Qué indican las rotaciones sobre la gestión operativa? ¿Problemas de cobranza o inventarios obsoletos? ¿Tendencia de mejora o deterioro?
+"""
+        
+        # ==================== SOLICITUD 3: CONCLUSIÓN GENERAL ====================
+        prompt3 = f"""Eres un analista financiero experto. Genera una CONCLUSIÓN GENERAL integradora sobre {empresa}.
+
+**EMPRESA:** {empresa}
+**AÑOS:** {', '.join(map(str, años))}
+
+**RESUMEN DE TODOS LOS RATIOS:**
+"""
+        for año in años:
+            ratios = ratios_por_año[año]
+            prompt3 += f"\n**{año}:** Liquidez={ratios.get('liquidez_corriente', 'N/A')}, Deuda={ratios.get('razon_deuda_total', 'N/A')}, ROE={ratios.get('roe', 'N/A')}, Rotación={ratios.get('rotacion_activos_totales', 'N/A')}\n"
+        
+        prompt3 += """
+**INSTRUCCIONES:**
+- Integra TODOS los aspectos: liquidez, endeudamiento, rentabilidad y eficiencia
+- Identifica el PATRÓN GENERAL entre años con análisis PROFUNDO
+- Evalúa salud financiera GLOBAL y perspectivas futuras
+- Proporciona 3-4 RECOMENDACIONES específicas, accionables y priorizadas
+- Máximo 15-18 líneas
+
+**ESTRUCTURA:**
+1. **DIAGNÓSTICO INTEGRAL** (6-7 líneas): ¿Cómo está la empresa en general? ¿Fortalezas principales? ¿Debilidades críticas? ¿Balance entre liquidez, rentabilidad y eficiencia? ¿Posición competitiva probable?
+2. **TENDENCIA GLOBAL** (4-5 líneas): ¿Mejorando o deteriorándose? ¿Sostenible a mediano plazo? ¿Riesgos principales? ¿Oportunidades visibles?
+3. **RECOMENDACIONES ESTRATÉGICAS** (5-6 líneas): 3-4 acciones concretas prioritarias con justificación breve. ¿Qué hacer primero? ¿Qué evitar?
+"""
+        
+        # Realizar las 3 solicitudes
+        analisis_partes = []
+        
+        # PARTE 1: Liquidez y Endeudamiento
+        completion1 = client.chat.completions.create(
+            model="openai/gpt-oss-20b",
+            messages=[
+                {
+                    "role": "system",
+                    "content": "Eres un analista financiero experto en análisis de liquidez y endeudamiento. Proporciona análisis DETALLADOS y específicos centrados ÚNICAMENTE en estos aspectos. Explica causas, consecuencias y contexto."
+                },
+                {
+                    "role": "user",
+                    "content": prompt1
+                }
+            ],
+            temperature=0.6,
+            max_tokens=2500,
+            top_p=0.9
+        )
+        analisis_partes.append(completion1.choices[0].message.content)
+        
+        # PARTE 2: Rentabilidad y Actividad
+        completion2 = client.chat.completions.create(
+            model="openai/gpt-oss-20b",
+            messages=[
+                {
+                    "role": "system",
+                    "content": "Eres un analista financiero experto en rentabilidad y eficiencia operativa. Proporciona análisis DETALLADOS y específicos centrados ÚNICAMENTE en estos aspectos. Explica causas, impactos y comparaciones."
+                },
+                {
+                    "role": "user",
+                    "content": prompt2
+                }
+            ],
+            temperature=0.6,
+            max_tokens=2800,
+            top_p=0.9
+        )
+        analisis_partes.append(completion2.choices[0].message.content)
+        
+        # PARTE 3: Conclusión General
+        completion3 = client.chat.completions.create(
+            model="openai/gpt-oss-20b",
+            messages=[
+                {
+                    "role": "system",
+                    "content": "Eres un analista financiero senior que integra todos los aspectos financieros para dar un diagnóstico completo y recomendaciones estratégicas. Proporciona análisis PROFUNDO con visión holística y recomendaciones priorizadas."
+                },
+                {
+                    "role": "user",
+                    "content": prompt3
+                }
+            ],
+            temperature=0.6,
+            max_tokens=2500,
+            top_p=0.9
+        )
+        analisis_partes.append(completion3.choices[0].message.content)
+        
+        # Combinar los 3 análisis
+        analisis_completo = f"""# ANÁLISIS FINANCIERO INTEGRAL - {empresa}
+
+## 📊 PARTE 1: ANÁLISIS DE LIQUIDEZ Y ENDEUDAMIENTO
+
+{analisis_partes[0]}
+
+---
+
+## 💰 PARTE 2: ANÁLISIS DE RENTABILIDAD Y EFICIENCIA
+
+{analisis_partes[1]}
+
+---
+
+## 🎯 PARTE 3: CONCLUSIÓN GENERAL Y RECOMENDACIONES
+
+{analisis_partes[2]}
+
+---
+
+*Análisis generado mediante IA (OpenAI GPT-4o-mini via Groq) en 3 fases especializadas*
+"""
+        
+        return analisis_completo
+        
+    except Exception as e:
+        return f"❌ Error al generar análisis con IA: {str(e)}"
 
 class AnalizadorFinanciero:
     def __init__(self):
@@ -1195,6 +1390,44 @@ def main():
                                 if graficos_ratios:
                                     for i, fig in enumerate(graficos_ratios, 1):
                                         st.plotly_chart(fig, use_container_width=True)
+                                
+                                # ===== ANÁLISIS CON IA =====
+                                st.markdown("---")
+                                st.markdown("##### 🤖 Análisis Inteligente con IA")
+                                st.caption("Análisis generado por IA en 3 fases especializadas (OpenAI GPT-4o-mini via Groq)")
+                                
+                                if st.button("🔍 Generar Análisis con IA (3 Fases)", key="btn_analisis_ia"):
+                                    # Contenedor para el progreso
+                                    progress_text = st.empty()
+                                    progress_bar = st.progress(0)
+                                    
+                                    progress_text.text("⏳ Fase 1/3: Analizando Liquidez y Endeudamiento...")
+                                    progress_bar.progress(0)
+                                    
+                                    # Generar análisis (internamente hace 3 solicitudes)
+                                    analisis_ia = analizar_ratios_con_ia(resultados_ratios, empresa)
+                                    
+                                    progress_bar.progress(100)
+                                    progress_text.text("✅ Análisis completado!")
+                                    
+                                    # Limpiar indicadores de progreso después de 1 segundo
+                                    import time
+                                    time.sleep(1)
+                                    progress_text.empty()
+                                    progress_bar.empty()
+                                    
+                                    # Mostrar el análisis en un expander
+                                    with st.expander("📄 Ver Análisis Completo de IA (3 Fases)", expanded=True):
+                                        st.markdown(analisis_ia)
+                                    
+                                    # Opción para descargar el análisis
+                                    st.download_button(
+                                        label="📥 Descargar Análisis de IA (TXT)",
+                                        data=analisis_ia,
+                                        file_name=f"analisis_ia_ratios_{empresa.replace(' ', '_')}.txt",
+                                        mime="text/plain",
+                                        key="download_analisis_ia"
+                                    )
                                 
                                 # Botón de exportación
                                 st.markdown("---")
