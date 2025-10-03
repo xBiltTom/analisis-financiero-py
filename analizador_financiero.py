@@ -17,6 +17,35 @@ from analisis_vertical_consolidado import AnalisisVerticalConsolidado
 from analisis_horizontal_consolidado import AnalisisHorizontalConsolidado
 from ratios_financieros import CalculadorRatiosFinancieros
 from groq import Groq
+from descargador_smv import DescargadorSMV
+
+# Importar configuración de API
+try:
+    from config_api import (
+        GROQ_API_KEY,
+        GROQ_MODEL,
+        GROQ_TEMPERATURE,
+        GROQ_MAX_TOKENS_FASE1,
+        GROQ_MAX_TOKENS_FASE2,
+        GROQ_MAX_TOKENS_FASE3,
+        GROQ_TOP_P
+    )
+except ImportError:
+    st.error("""
+    ❌ **Error: Archivo de configuración no encontrado**
+    
+    Por favor, crea el archivo `config_api.py` con tu API key de Groq:
+    
+    1. Copia el template:
+       ```
+       copy config_api.template.py config_api.py
+       ```
+    
+    2. Edita `config_api.py` y agrega tu API key
+    
+    3. Obtén tu API key en: https://console.groq.com/
+    """)
+    st.stop()
 
 # Configuración de la página
 st.set_page_config(
@@ -38,8 +67,8 @@ def analizar_ratios_con_ia(resultados_ratios: Dict[str, Any], empresa: str) -> s
         str: Análisis completo generado por la IA (combinación de 3 análisis)
     """
     try:
-        # Inicializar cliente Groq con API key
-        client = Groq(api_key="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")
+        # Inicializar cliente Groq con API key desde configuración
+        client = Groq(api_key=GROQ_API_KEY)
         
         # Preparar datos de ratios
         años = sorted(resultados_ratios['años'])
@@ -136,7 +165,7 @@ def analizar_ratios_con_ia(resultados_ratios: Dict[str, Any], empresa: str) -> s
         
         # PARTE 1: Liquidez y Endeudamiento
         completion1 = client.chat.completions.create(
-            model="openai/gpt-oss-20b",
+            model=GROQ_MODEL,
             messages=[
                 {
                     "role": "system",
@@ -147,15 +176,15 @@ def analizar_ratios_con_ia(resultados_ratios: Dict[str, Any], empresa: str) -> s
                     "content": prompt1
                 }
             ],
-            temperature=0.6,
-            max_tokens=2500,
-            top_p=0.9
+            temperature=GROQ_TEMPERATURE,
+            max_tokens=GROQ_MAX_TOKENS_FASE1,
+            top_p=GROQ_TOP_P
         )
         analisis_partes.append(completion1.choices[0].message.content)
         
         # PARTE 2: Rentabilidad y Actividad
         completion2 = client.chat.completions.create(
-            model="openai/gpt-oss-20b",
+            model=GROQ_MODEL,
             messages=[
                 {
                     "role": "system",
@@ -166,15 +195,15 @@ def analizar_ratios_con_ia(resultados_ratios: Dict[str, Any], empresa: str) -> s
                     "content": prompt2
                 }
             ],
-            temperature=0.6,
-            max_tokens=2800,
-            top_p=0.9
+            temperature=GROQ_TEMPERATURE,
+            max_tokens=GROQ_MAX_TOKENS_FASE2,
+            top_p=GROQ_TOP_P
         )
         analisis_partes.append(completion2.choices[0].message.content)
         
         # PARTE 3: Conclusión General
         completion3 = client.chat.completions.create(
-            model="openai/gpt-oss-20b",
+            model=GROQ_MODEL,
             messages=[
                 {
                     "role": "system",
@@ -185,9 +214,9 @@ def analizar_ratios_con_ia(resultados_ratios: Dict[str, Any], empresa: str) -> s
                     "content": prompt3
                 }
             ],
-            temperature=0.6,
-            max_tokens=2500,
-            top_p=0.9
+            temperature=GROQ_TEMPERATURE,
+            max_tokens=GROQ_MAX_TOKENS_FASE3,
+            top_p=GROQ_TOP_P
         )
         analisis_partes.append(completion3.choices[0].message.content)
         
@@ -1028,15 +1057,340 @@ def main():
     
     # Sidebar para configuración
     st.sidebar.header("⚙️ Configuración")
-    st.sidebar.markdown("Sube uno o varios archivos XLS para analizar")
     
-    # Upload de archivos
-    archivos_subidos = st.file_uploader(
-        "Selecciona archivos XLS de estados financieros",
-        type=['xls', 'xlsx'],
-        accept_multiple_files=True,
-        help="Puedes subir múltiples archivos XLS con estados financieros"
-    )
+    # ===== NUEVA FUNCIONALIDAD: DESCARGA AUTOMÁTICA =====
+    st.sidebar.markdown("---")
+    st.sidebar.subheader("🤖 Descarga Automática SMV")
+    
+    with st.sidebar.expander("📥 Configurar Descarga Automática", expanded=False):
+        st.markdown("""
+        **Descarga automática** desde la web de la SMV (Superintendencia del Mercado de Valores)
+        
+        Esta función:
+        - 🔍 Busca la empresa automáticamente
+        - 📅 Descarga múltiples años consecutivos
+        - 📂 Guarda en carpeta `descargas/`
+        - � **Modo rápido** (sin mostrar navegador)
+        - �📊 Analiza automáticamente los archivos
+        """)
+        
+        # ✨ NUEVA FUNCIONALIDAD: Búsqueda con sugerencias
+        st.markdown("##### 🔍 Buscar Empresa")
+        
+        # Input nombre de empresa con botón al lado
+        col_input, col_boton = st.columns([4, 1])
+        
+        with col_input:
+            nombre_empresa_busqueda = st.text_input(
+                "Escribe para buscar",
+                placeholder="Ej: SAN JUAN, BACKUS, ALICORP",
+                help="Escribe parte del nombre y presiona Buscar",
+                key="busqueda_empresa",
+                label_visibility="collapsed"
+            )
+        
+        with col_boton:
+            boton_buscar = st.button("🔎 Buscar", use_container_width=True)
+        
+        # Inicializar variable de empresa seleccionada
+        nombre_empresa_final = nombre_empresa_busqueda
+        
+        # Mostrar sugerencias si se presionó buscar y hay texto
+        if boton_buscar and nombre_empresa_busqueda and len(nombre_empresa_busqueda) >= 3:
+            with st.spinner("🔎 Buscando empresas..."):
+                try:
+                    # Crear instancia temporal para obtener empresas
+                    download_dir = os.path.join(os.getcwd(), "descargas")
+                    descargador_temp = DescargadorSMV(download_dir, headless=True)
+                    
+                    # Iniciar navegador y obtener empresas
+                    if descargador_temp.iniciar_navegador():
+                        empresas_disponibles = descargador_temp.obtener_empresas_disponibles()
+                        descargador_temp.cerrar_navegador()
+                        
+                        # Filtrar empresas que coincidan con la búsqueda
+                        busqueda_lower = nombre_empresa_busqueda.lower()
+                        empresas_coincidentes = [
+                            emp for emp in empresas_disponibles
+                            if busqueda_lower in emp['text'].lower()
+                        ]
+                        
+                        # Guardar resultados en session_state
+                        st.session_state['empresas_encontradas'] = empresas_coincidentes
+                        
+                except Exception as e:
+                    st.error(f"❌ Error en búsqueda: {str(e)}")
+        
+        # Mostrar resultados de búsqueda si existen
+        if 'empresas_encontradas' in st.session_state and st.session_state['empresas_encontradas']:
+            empresas_coincidentes = st.session_state['empresas_encontradas']
+            
+            if empresas_coincidentes:
+                st.success(f"✅ {len(empresas_coincidentes)} empresa(s) encontrada(s)")
+                
+                # Crear lista de nombres para el selectbox
+                nombres_empresas = [emp['text'] for emp in empresas_coincidentes]
+                
+                # Selectbox para elegir empresa
+                nombre_empresa_final = st.selectbox(
+                    "Selecciona la empresa exacta",
+                    options=nombres_empresas,
+                    key="empresa_seleccionada"
+                )
+            else:
+                st.warning(f"⚠️ No se encontraron empresas con '{nombre_empresa_busqueda}'")
+        
+        st.markdown("---")
+        st.markdown("##### 📅 Seleccionar Rango de Años")
+        
+        # Selector de rango de años
+        col1, col2 = st.columns(2)
+        with col1:
+            año_inicio = st.number_input(
+                "Año inicio (más reciente)",
+                min_value=2010,
+                max_value=2024,
+                value=2024,
+                step=1
+            )
+        with col2:
+            año_fin = st.number_input(
+                "Año fin (más antiguo)",
+                min_value=2010,
+                max_value=2024,
+                value=2020,
+                step=1
+            )
+        
+        # Validación
+        if año_inicio < año_fin:
+            st.warning("⚠️ El año de inicio debe ser mayor o igual al año final")
+        
+        # Checkbox para modo headless
+        modo_visible = st.checkbox(
+            "🖥️ Mostrar navegador (más lento)",
+            value=False,
+            help="Si activas esto, verás el navegador Chrome. Desactivado = más rápido"
+        )
+        
+        # Botón de descarga
+        if st.button("🚀 Iniciar Descarga Automática", disabled=(año_inicio < año_fin)):
+            if not nombre_empresa_final:
+                st.error("❌ Por favor, ingresa el nombre de la empresa")
+            else:
+                st.info("🔄 Proceso de descarga iniciado...")
+                
+                # Crear contenedor para progreso
+                contenedor_progreso = st.container()
+                
+                with contenedor_progreso:
+                    # Crear área de texto para mensajes de progreso
+                    area_mensajes = st.empty()
+                    mensajes_acumulados = []
+                    
+                    def callback_streamlit(mensaje):
+                        """Callback para actualizar progreso en Streamlit"""
+                        mensajes_acumulados.append(mensaje)
+                        # Mostrar últimos 15 mensajes
+                        texto_mostrar = "\n".join(mensajes_acumulados[-15:])
+                        area_mensajes.text_area(
+                            "📋 Registro de Progreso",
+                            value=texto_mostrar,
+                            height=300,
+                            key=f"progreso_{len(mensajes_acumulados)}"
+                        )
+                    
+                    # Crear descargador con modo headless configurable
+                    try:
+                        callback_streamlit(f"🏢 Empresa: {nombre_empresa_final}")
+                        callback_streamlit(f"📅 Años: {año_inicio} → {año_fin}")
+                        callback_streamlit(f"🚀 Modo: {'Visible' if modo_visible else 'Rápido (headless)'}")
+                        
+                        descargador = DescargadorSMV(
+                            download_dir=os.path.join(os.getcwd(), "descargas"),
+                            driver_path=None,  # ✨ Usar webdriver-manager automático
+                            headless=not modo_visible  # ✨ Modo headless por defecto
+                        )
+                        
+                        # Ejecutar proceso completo
+                        resultado = descargador.proceso_completo(
+                            nombre_empresa=nombre_empresa_final,
+                            año_inicio=int(año_inicio),
+                            año_fin=int(año_fin),
+                            callback_progreso=callback_streamlit
+                        )
+                        
+                        # Mostrar resultados
+                        if 'error' in resultado:
+                            st.error(f"❌ {resultado['error']}")
+                        else:
+                            st.success("✅ Descarga completada!")
+                            
+                            col_res1, col_res2, col_res3 = st.columns(3)
+                            with col_res1:
+                                st.metric("Empresa", resultado['empresa'])
+                            with col_res2:
+                                st.metric("Archivos descargados", resultado['total_exitosos'])
+                            with col_res3:
+                                st.metric("Errores", resultado['total_fallidos'])
+                            
+                            if resultado['años_exitosos']:
+                                st.info(f"✅ Años descargados: {', '.join(map(str, resultado['años_exitosos']))}")
+                            
+                            if resultado['años_fallidos']:
+                                st.warning(f"⚠️ Años con error: {', '.join(map(str, resultado['años_fallidos']))}")
+                            
+                            st.markdown(f"📂 **Carpeta de descargas:** `{resultado['carpeta_descargas']}`")
+                            
+                            # ✨ NUEVA FUNCIONALIDAD: Cargar y analizar archivos automáticamente
+                            if resultado['total_exitosos'] > 0:
+                                st.info("� Cargando archivos descargados automáticamente para análisis...")
+                                
+                                # Guardar resultado en session_state para análisis posterior
+                                st.session_state['archivos_descargados'] = resultado
+                                st.session_state['analizar_descargados'] = True
+                                
+                                # Recargar página para procesar archivos
+                                st.rerun()
+                    
+                    except Exception as e:
+                        st.error(f"❌ Error en descarga automática: {str(e)}")
+                        import traceback
+                        st.code(traceback.format_exc())
+    
+    st.sidebar.markdown("---")
+    st.sidebar.markdown("**O sube archivos manualmente:**")
+    
+    # ✨ VERIFICAR SI HAY ARCHIVOS DESCARGADOS AUTOMÁTICAMENTE PARA ANALIZAR
+    archivos_subidos = None
+    
+    # Guardar flag de descarga automática en variable antes de limpiarla
+    es_descarga_automatica = 'analizar_descargados' in st.session_state and st.session_state['analizar_descargados']
+    
+    if es_descarga_automatica:
+        # Limpiar flag
+        st.session_state['analizar_descargados'] = False
+        resultado_descarga = st.session_state.get('archivos_descargados', {})
+        
+        # Guardar información en session_state para uso persistente
+        if resultado_descarga and resultado_descarga.get('total_exitosos', 0) > 0:
+            st.session_state['usando_descarga_automatica'] = True
+            st.session_state['carpeta_descargas_activa'] = resultado_descarga.get('carpeta_descargas', os.path.join(os.getcwd(), "descargas"))
+    
+    # Cargar archivos si estamos en modo descarga automática
+    if st.session_state.get('usando_descarga_automatica', False):
+        carpeta_descargas = st.session_state.get('carpeta_descargas_activa', os.path.join(os.getcwd(), "descargas"))
+        
+        # Verificar si hay archivos para eliminar
+        if 'archivo_a_eliminar' in st.session_state:
+            archivo_eliminar = st.session_state['archivo_a_eliminar']
+            ruta_eliminar = os.path.join(carpeta_descargas, archivo_eliminar)
+            try:
+                if os.path.exists(ruta_eliminar):
+                    os.remove(ruta_eliminar)
+                    st.success(f"🗑️ {archivo_eliminar} eliminado correctamente")
+            except Exception as e:
+                st.error(f"❌ Error al eliminar {archivo_eliminar}: {str(e)}")
+            finally:
+                del st.session_state['archivo_a_eliminar']
+        
+        # Cargar archivos actuales de la carpeta
+        if os.path.exists(carpeta_descargas):
+            archivos_en_descargas = [
+                f for f in os.listdir(carpeta_descargas)
+                if f.endswith(('.xls', '.xlsx'))
+            ]
+            
+            if archivos_en_descargas:
+                # Mostrar información de archivos con opción de eliminar
+                st.info(f"📂 {len(archivos_en_descargas)} archivo(s) desde descargas automáticas")
+                
+                # Crear contenedor para mostrar archivos con botones de eliminación
+                st.markdown("#### 📁 Archivos en Carpeta Descargas")
+                
+                archivos_a_cargar = []
+                for idx, nombre_archivo in enumerate(archivos_en_descargas):
+                    col1, col2, col3 = st.columns([4, 1, 1])
+                    with col1:
+                        st.text(f"📄 {nombre_archivo}")
+                    with col2:
+                        # Checkbox para incluir en análisis
+                        incluir = st.checkbox("✓", value=True, key=f"incluir_{idx}", label_visibility="collapsed")
+                        if incluir:
+                            archivos_a_cargar.append(nombre_archivo)
+                    with col3:
+                        # Botón para eliminar
+                        if st.button("❌", key=f"eliminar_desc_{idx}", help=f"Eliminar {nombre_archivo}"):
+                            st.session_state['archivo_a_eliminar'] = nombre_archivo
+                            st.rerun()
+                
+                # Botón para limpiar modo descarga automática
+                if st.button("🔄 Volver a subida manual"):
+                    del st.session_state['usando_descarga_automatica']
+                    if 'carpeta_descargas_activa' in st.session_state:
+                        del st.session_state['carpeta_descargas_activa']
+                    st.rerun()
+                
+                # Cargar archivos seleccionados
+                if archivos_a_cargar:
+                    archivos_subidos = []
+                    
+                    # Crear clase para simular archivos subidos con ruta física
+                    class ArchivoSimulado:
+                        def __init__(self, nombre, contenido, ruta_fisica=None):
+                            self.name = nombre
+                            self._contenido = contenido
+                            self.ruta_fisica = ruta_fisica
+                        def getbuffer(self):
+                            return self._contenido
+                    
+                    for nombre_archivo in archivos_a_cargar:
+                        ruta_archivo = os.path.join(carpeta_descargas, nombre_archivo)
+                        try:
+                            with open(ruta_archivo, 'rb') as f:
+                                contenido = f.read()
+                                archivos_subidos.append(ArchivoSimulado(nombre_archivo, contenido, ruta_archivo))
+                        except Exception as e:
+                            st.warning(f"⚠️ Error al cargar {nombre_archivo}: {str(e)}")
+                    
+                    if archivos_subidos:
+                        st.success(f"✅ {len(archivos_subidos)} archivo(s) listos para analizar")
+            else:
+                st.warning("⚠️ No hay archivos en la carpeta descargas")
+                if st.button("🔄 Volver a subida manual"):
+                    del st.session_state['usando_descarga_automatica']
+                    if 'carpeta_descargas_activa' in st.session_state:
+                        del st.session_state['carpeta_descargas_activa']
+                    st.rerun()
+    
+    # Upload de archivos (solo si no hay archivos descargados automáticamente)
+    if not archivos_subidos:
+        archivos_subidos = st.file_uploader(
+            "Selecciona archivos XLS de estados financieros",
+            type=['xls', 'xlsx'],
+            accept_multiple_files=True,
+            help="Puedes subir múltiples archivos XLS con estados financieros"
+        )
+    
+    # ===== OPCIÓN: CARGAR ARCHIVOS DESDE CARPETA DESCARGAS =====
+    st.sidebar.markdown("---")
+    
+    # No mostrar esta opción si ya estamos en modo descarga automática
+    if not st.session_state.get('usando_descarga_automatica', False):
+        if os.path.exists(os.path.join(os.getcwd(), "descargas")):
+            archivos_en_descargas = [
+                f for f in os.listdir(os.path.join(os.getcwd(), "descargas"))
+                if f.endswith(('.xls', '.xlsx'))
+            ]
+            
+            if archivos_en_descargas:
+                st.sidebar.success(f"📂 {len(archivos_en_descargas)} archivo(s) en carpeta descargas")
+                
+                if st.sidebar.button("📊 Cargar archivos desde carpeta descargas"):
+                    # Activar modo manual desde descargas
+                    st.session_state['usando_descarga_automatica'] = True
+                    st.session_state['carpeta_descargas_activa'] = os.path.join(os.getcwd(), "descargas")
+                    st.rerun()
     
     if archivos_subidos:
         st.success(f"✅ {len(archivos_subidos)} archivo(s) cargado(s)")

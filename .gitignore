@@ -1,19 +1,82 @@
-echo "__pycache__/
-*.pyc
-*.pyo
-*.pyd
-.Python
-*.so
+# Pythonecho "__pycache__/
+
+__pycache__/*.pyc
+
+*.py[cod]*.pyo
+
+*$py.class*.pyd
+
+*.so.Python
+
+.Python*.so
+
+build/.pytest_cache/
+
+develop-eggs/.coverage
+
+dist/htmlcov/
+
+downloads/*.egg-info/
+
+eggs/dist/
+
+.eggs/build/
+
+lib/*.xlsx
+
+lib64/*.xls
+
+parts/*.csv
+
+sdist/.env
+
+var/.venv
+
+wheels/venv/
+
+*.egg-info/*.log" > .gitignore
+.installed.cfg
+*.egg
+
+# Virtual Environment
+venv/
+env/
+ENV/
+.venv
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Jupyter Notebook
+.ipynb_checkpoints
+
+# Testing
 .pytest_cache/
 .coverage
 htmlcov/
-*.egg-info/
-dist/
-build/
+*.cover
+
+# Archivos de datos
 *.xlsx
 *.xls
 *.csv
+temp/
+descargas/
+archivos_eliminados_backup/
+
+# Archivos temporales
+*.log
+*.bak
+*.tmp
+
+# ⚠️ CONFIGURACIÓN SENSIBLE - NO SUBIR A GIT
+config_api.py
 .env
-.venv
-venv/
-*.log" > .gitignore
+
+# Sistema
+.DS_Store
+Thumbs.db
