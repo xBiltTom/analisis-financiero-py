@@ -221,6 +221,16 @@ class ExtractorEstadosFinancieros:
                         años.append(año)
                         columnas_años[año] = i
         
+        # Si aún no se encuentran años, usar el año del documento
+        if not años and self.año_documento:
+            print(f"   ⚠️ No se detectaron años en tabla, usando año del documento: {self.año_documento}")
+            años = [self.año_documento]
+            # Intentar detectar la columna de valores (generalmente la última columna numérica)
+            if len(headers) > 2:
+                columnas_años[self.año_documento] = len(headers) - 1
+            else:
+                columnas_años[self.año_documento] = 2  # Columna por defecto
+        
         # Extraer cuentas (filas de datos)
         cuentas = []
         for i, fila in enumerate(filas[1:], start=1):  # Saltar header
@@ -262,7 +272,8 @@ class ExtractorEstadosFinancieros:
             'nombre': nombre_estado,
             'años': sorted(años, reverse=True),  # Más reciente primero
             'cuentas': cuentas,
-            'total_cuentas': len(cuentas)
+            'total_cuentas': len(cuentas),
+            'año_documento': self.año_documento  # Incluir año del documento como fallback
         }
     
     def _extraer_patrimonio_simplificado(self, tabla: Tag, nombre_estado: str) -> Dict:
@@ -350,7 +361,8 @@ class ExtractorEstadosFinancieros:
             'años': [año_doc],  # Solo el año del documento
             'cuentas': cuentas,
             'total_cuentas': len(cuentas),
-            'columnas_especiales': ['CCUENTA', 'Cuenta', 'Total Patrimonio']  # Metadato
+            'columnas_especiales': ['CCUENTA', 'Cuenta', 'Total Patrimonio'],  # Metadato
+            'año_documento': año_doc  # Incluir año del documento como fallback
         }
     
     def _convertir_a_numero(self, texto: str) -> float:

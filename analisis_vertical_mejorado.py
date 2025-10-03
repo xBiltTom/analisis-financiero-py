@@ -108,7 +108,14 @@ class AnalisisVerticalMejorado:
         - PATRIMONIO: NO SE CALCULA
         """
         años = balance['años']
-        año_analisis = años[0]  # Año más reciente
+        
+        # Validar que hay años disponibles
+        if not años:
+            print(f"   ⚠️ No se encontraron años en el balance, usando año del documento")
+            año_analisis = balance.get('año_documento', 2024)  # Usar año del documento como fallback
+        else:
+            año_analisis = años[0]  # Año más reciente
+        
         cuentas = balance['cuentas']
         
         resultado = {
@@ -219,7 +226,14 @@ class AnalisisVerticalMejorado:
         Calcula: (Cuenta / Ventas o Ingresos Totales) * 100
         """
         años = resultados['años']
-        año_analisis = años[0]
+        
+        # Validar que hay años disponibles
+        if not años:
+            print(f"   ⚠️ No se encontraron años en resultados, usando año del documento")
+            año_analisis = resultados.get('año_documento', 2024)
+        else:
+            año_analisis = años[0]
+        
         cuentas = resultados['cuentas']
         
         resultado = {
@@ -270,7 +284,14 @@ class AnalisisVerticalMejorado:
         - Similar pero con nombres diferentes de secciones
         """
         años = flujo['años']
-        año_analisis = años[0]
+        
+        # Validar que hay años disponibles
+        if not años:
+            print(f"   ⚠️ No se encontraron años en flujo de efectivo, usando año del documento")
+            año_analisis = flujo.get('año_documento', 2024)
+        else:
+            año_analisis = años[0]
+        
         cuentas = flujo['cuentas']
         
         resultado = {
