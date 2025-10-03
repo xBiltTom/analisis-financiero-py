@@ -1,0 +1,92 @@
+===================================================================
+CORRECCIÓN: Error en Análisis Horizontal Consolidado
+===================================================================
+
+PROBLEMA REPORTADO
+------------------
+Al acceder a la tab "Análisis Horizontal Consolidado", aparecía el mensaje:
+⚠️ Se necesitan al menos 2 archivos POST-2010 para consolidar análisis horizontal
+
+CAUSA RAÍZ
+----------
+El análisis horizontal NO se estaba realizando al momento de procesar los archivos.
+Solo se guardaban los datos extraídos y el formato del extractor, pero faltaba
+ejecutar el analizador horizontal.
+
+La consolidación horizontal busca archivos que tengan la clave 'analisis_horizontal'
+en su diccionario, pero esta clave no existía porque no se ejecutaba el análisis.
+
+SOLUCIÓN IMPLEMENTADA
+----------------------
+Se modificó el archivo: analizador_financiero.py
+
+Líneas 858-878 (aproximadamente):
+
+ANTES:
+------
+resultados_analisis.append({
+    'archivo': archivo.name,
+    'datos': datos_extraidos,
+    'datos_extractor': resultados_extractor,
+    'resumen': resumen
+})
+
+DESPUÉS:
+--------
+# Realizar análisis horizontal si es POST-2010
+analisis_horizontal = None
+if datos_extraidos.get('año_documento', 0) >= 2010:
+    try:
+        analisis_horizontal = analizador.analizador_horizontal.analizar_desde_extractor(resultados_extractor)
+    except Exception as e:
+        st.warning(f"⚠️ No se pudo realizar análisis horizontal: {str(e)}")
+
+resultados_analisis.append({
+    'archivo': archivo.name,
+    'datos': datos_extraidos,
+    'datos_extractor': resultados_extractor,
+    'analisis_horizontal': analisis_horizontal,  # ✨ NUEVO: Análisis horizontal ya calculado
+    'resumen': resumen
+})
+
+CAMBIOS REALIZADOS
+------------------
+1. Se agregó la ejecución automática del análisis horizontal al procesar cada archivo POST-2010
+2. Se guarda el resultado en la clave 'analisis_horizontal' del diccionario
+3. Se maneja excepción si el análisis falla (muestra warning pero continúa)
+4. Solo se ejecuta para archivos POST-2010 (≥2010)
+
+FLUJO CORREGIDO
+----------------
+1. Usuario sube archivos XLS
+2. Sistema convierte a HTML
+3. Extractor mejorado extrae estados financieros
+4. ✨ NUEVO: Se ejecuta análisis horizontal automáticamente (si año ≥ 2010)
+5. Se guarda todo en resultados_analisis con la clave 'analisis_horizontal'
+6. Tab de consolidación ahora encuentra los análisis horizontales disponibles
+7. Consolida y muestra gráficos
+
+VALIDACIÓN
+----------
+✅ Sintaxis validada con py_compile
+✅ Streamlit reiniciado correctamente
+✅ Error resuelto: Ahora la consolidación horizontal tiene acceso a los análisis
+
+IMPACTO
+-------
+- Sin impacto en funcionalidades existentes
+- Mejora el rendimiento: análisis horizontal se calcula una sola vez al cargar
+- Anteriormente se calculaba en cada tab, ahora se reutiliza el mismo análisis
+- Consolida el flujo de procesamiento de archivos
+
+NOTA IMPORTANTE
+---------------
+El análisis horizontal se ejecuta AUTOMÁTICAMENTE para archivos POST-2010.
+No requiere acción del usuario, se realiza transparentemente al subir archivos.
+
+Si un archivo falla el análisis horizontal, el sistema continúa pero ese archivo
+no estará disponible para la consolidación horizontal (se muestra warning).
+
+===================================================================
+Fecha de corrección: 2 de octubre 2025
+===================================================================

@@ -13,6 +13,9 @@ from analisis_vertical_horizontal import AnalisisVerticalHorizontal
 from extractor_estados_mejorado import ExtractorEstadosFinancieros
 from analisis_vertical_mejorado import AnalisisVerticalMejorado
 from analisis_horizontal_mejorado import AnalisisHorizontalMejorado
+from analisis_vertical_consolidado import AnalisisVerticalConsolidado
+from analisis_horizontal_consolidado import AnalisisHorizontalConsolidado
+from ratios_financieros import CalculadorRatiosFinancieros
 
 # Configuración de la página
 st.set_page_config(
@@ -30,6 +33,9 @@ class AnalizadorFinanciero:
         self.extractor_mejorado = ExtractorEstadosFinancieros()  # ✨ Nuevo extractor mejorado
         self.analizador_vertical = AnalisisVerticalMejorado()  # ✨ Nuevo analizador vertical
         self.analizador_horizontal = AnalisisHorizontalMejorado()  # ✨ Nuevo analizador horizontal
+        self.consolidador_vertical = AnalisisVerticalConsolidado()  # ✨ Consolidador vertical
+        self.consolidador_horizontal = AnalisisHorizontalConsolidado()  # ✨ Consolidador horizontal
+        self.calculador_ratios = CalculadorRatiosFinancieros()  # ✨ Calculador de ratios financieros
         
     def crear_directorio_temporal(self):
         """Crear directorio temporal para almacenar archivos"""
@@ -714,6 +720,7 @@ class AnalizadorFinanciero:
             cuentas_consolidadas = {}
             años_disponibles = set()
             tiene_ccuenta = False  # ✨ NUEVO: Flag para patrimonio
+            orden_cuentas = []  # ✨ NUEVO: Mantener orden de aparición
             
             # Procesar cada archivo
             for resultado in archivos_post_2010:
@@ -728,25 +735,34 @@ class AnalizadorFinanciero:
                         tiene_ccuenta = True
                     
                     # Procesar cada cuenta del estado
-                    for item in estado_datos.get('datos', []):
-                        # ✨ NUEVO: Para patrimonio, usar CCUENTA como identificador
+                    for idx, item in enumerate(estado_datos.get('datos', [])):
+                        # ✨ MEJORADO: Usar índice + nombre para evitar duplicados
+                        nombre_cuenta = item.get('cuenta', 'Sin cuenta')
+                        
+                        # Para patrimonio, usar CCUENTA como identificador
                         if tiene_ccuenta and 'ccuenta' in item:
                             ccuenta = item.get('ccuenta', '')
-                            nombre_cuenta = item.get('cuenta', 'Sin cuenta')
                             clave_cuenta = f"{ccuenta}|{nombre_cuenta}"  # Usar CCUENTA|Cuenta como clave única
                         else:
-                            nombre_cuenta = item.get('cuenta', 'Sin cuenta')
-                            clave_cuenta = nombre_cuenta
+                            # ✨ NUEVO: Usar índice + nombre para garantizar unicidad
+                            clave_cuenta = f"{idx:04d}|{nombre_cuenta}"
                         
                         # Inicializar cuenta si no existe
                         if clave_cuenta not in cuentas_consolidadas:
                             if tiene_ccuenta:
                                 cuentas_consolidadas[clave_cuenta] = {
                                     'ccuenta': item.get('ccuenta', ''),
-                                    'cuenta': nombre_cuenta
+                                    'cuenta': nombre_cuenta,
+                                    'idx': idx  # ✨ NUEVO: Mantener orden
                                 }
                             else:
-                                cuentas_consolidadas[clave_cuenta] = {'cuenta': nombre_cuenta}
+                                cuentas_consolidadas[clave_cuenta] = {
+                                    'cuenta': nombre_cuenta,
+                                    'idx': idx  # ✨ NUEVO: Mantener orden
+                                }
+                            # Registrar orden de aparición solo la primera vez
+                            if clave_cuenta not in orden_cuentas:
+                                orden_cuentas.append(clave_cuenta)
                         
                         # Agregar valores por año (solo si no se ha procesado ese año antes)
                         for clave, valor in item.items():
@@ -764,24 +780,28 @@ class AnalizadorFinanciero:
             
             # Convertir a DataFrame
             if cuentas_consolidadas:
-                # Crear lista de filas para DataFrame
+                # ✨ MEJORADO: Crear lista de filas en el orden correcto
                 filas_consolidadas = []
-                for clave_cuenta, datos_cuenta in cuentas_consolidadas.items():
-                    fila = {}
-                    
-                    # ✨ NUEVO: Para patrimonio, incluir CCUENTA
-                    if tiene_ccuenta:
-                        fila['CCUENTA'] = datos_cuenta.get('ccuenta', '')
-                        fila['Cuenta'] = datos_cuenta.get('cuenta', '')
-                    else:
-                        fila['Cuenta'] = datos_cuenta.get('cuenta', '')
-                    
-                    # Agregar valores por año
-                    for año in sorted(años_disponibles, reverse=True):
-                        if año in datos_cuenta:
-                            fila[año] = datos_cuenta[año]
-                    
-                    filas_consolidadas.append(fila)
+                
+                # Iterar en el orden de aparición original
+                for clave_cuenta in orden_cuentas:
+                    if clave_cuenta in cuentas_consolidadas:
+                        datos_cuenta = cuentas_consolidadas[clave_cuenta]
+                        fila = {}
+                        
+                        # ✨ NUEVO: Para patrimonio, incluir CCUENTA
+                        if tiene_ccuenta:
+                            fila['CCUENTA'] = datos_cuenta.get('ccuenta', '')
+                            fila['Cuenta'] = datos_cuenta.get('cuenta', '')
+                        else:
+                            fila['Cuenta'] = datos_cuenta.get('cuenta', '')
+                        
+                        # Agregar valores por año
+                        for año in sorted(años_disponibles, reverse=True):
+                            if año in datos_cuenta:
+                                fila[año] = datos_cuenta[año]
+                        
+                        filas_consolidadas.append(fila)
                 
                 df = pd.DataFrame(filas_consolidadas)
                 
@@ -855,10 +875,20 @@ def main():
                             
                             # Generar resumen
                             resumen = analizador.generar_resumen_analisis(datos_extraidos)
+                            
+                            # Realizar análisis horizontal si es POST-2010
+                            analisis_horizontal = None
+                            if datos_extraidos.get('año_documento', 0) >= 2010:
+                                try:
+                                    analisis_horizontal = analizador.analizador_horizontal.analizar_desde_extractor(resultados_extractor)
+                                except Exception as e:
+                                    st.warning(f"⚠️ No se pudo realizar análisis horizontal: {str(e)}")
+                            
                             resultados_analisis.append({
                                 'archivo': archivo.name,
                                 'datos': datos_extraidos,
                                 'datos_extractor': resultados_extractor,  # ✨ Formato extractor para análisis horizontal/vertical
+                                'analisis_horizontal': analisis_horizontal,  # ✨ Análisis horizontal ya calculado
                                 'resumen': resumen
                             })
                             
@@ -904,11 +934,13 @@ def main():
             st.header("📈 Análisis Consolidado")
             
             # Crear tabs para diferentes vistas
-            tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
+            tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8, tab9 = st.tabs([
                 "Resumen General", 
                 "Vista Consolidada (≥2010)", 
                 "Estados Financieros", 
                 "Análisis Vertical", 
+                "Análisis Vertical Consolidado",
+                "Análisis Horizontal Consolidado",
                 "Análisis Horizontal",
                 "Comparativo", 
                 "Datos Detallados"
@@ -1013,6 +1045,177 @@ def main():
                                     )
                     else:
                         st.warning("No se pudo consolidar la información. Verifica que los archivos sean del formato POST-2010.")
+                    
+                    # ===== SECCIÓN DE RATIOS FINANCIEROS =====
+                    st.markdown("---")
+                    st.subheader("📊 Ratios Financieros")
+                    st.caption("Indicadores calculados desde el Estado de Situación Financiera")
+                    
+                    try:
+                        # Extraer solo los datos_extractor de los archivos POST-2010
+                        extractores_post_2010 = [
+                            r.get('datos_extractor') 
+                            for r in archivos_post_2010 
+                            if r.get('datos_extractor') is not None
+                        ]
+                        
+                        if len(extractores_post_2010) > 0:
+                            with st.spinner("Calculando ratios financieros..."):
+                                resultados_ratios = analizador.calculador_ratios.calcular_ratios_desde_extractor(extractores_post_2010)
+                            
+                            if 'error' not in resultados_ratios and resultados_ratios.get('ratios_por_año'):
+                                st.success(f"✅ Ratios calculados para {len(resultados_ratios['años'])} años")
+                                
+                                # Crear DataFrame con los ratios
+                                años_ratios = sorted(resultados_ratios['años'])
+                                ratios_data = []
+                                
+                                for año in años_ratios:
+                                    ratios_año = resultados_ratios['ratios_por_año'][año]
+                                    ratios_data.append({
+                                        'Año': año,
+                                        'Liquidez Corriente': ratios_año.get('liquidez_corriente'),
+                                        'Prueba Ácida': ratios_año.get('prueba_acida'),
+                                        'Razón Deuda Total': ratios_año.get('razon_deuda_total'),
+                                        'Razón Deuda/Patrimonio': ratios_año.get('razon_deuda_patrimonio'),
+                                        'Margen Neto': ratios_año.get('margen_neto'),
+                                        'ROA': ratios_año.get('roa'),
+                                        'ROE': ratios_año.get('roe'),
+                                        'Rotación Activos Totales': ratios_año.get('rotacion_activos_totales'),
+                                        'Rotación CxC': ratios_año.get('rotacion_cuentas_cobrar'),
+                                        'Rotación Inventarios': ratios_año.get('rotacion_inventarios')
+                                    })
+                                
+                                df_ratios = pd.DataFrame(ratios_data)
+                                
+                                # Mostrar tabla de ratios
+                                st.markdown("##### 📋 Tabla de Ratios")
+                                df_ratios_display = df_ratios.copy()
+                                df_ratios_display['Liquidez Corriente'] = df_ratios_display['Liquidez Corriente'].apply(
+                                    lambda x: f"{x:.2f}" if pd.notnull(x) else "N/A"
+                                )
+                                df_ratios_display['Prueba Ácida'] = df_ratios_display['Prueba Ácida'].apply(
+                                    lambda x: f"{x:.2f}" if pd.notnull(x) else "N/A"
+                                )
+                                df_ratios_display['Razón Deuda Total'] = df_ratios_display['Razón Deuda Total'].apply(
+                                    lambda x: f"{x:.1%}" if pd.notnull(x) else "N/A"
+                                )
+                                df_ratios_display['Razón Deuda/Patrimonio'] = df_ratios_display['Razón Deuda/Patrimonio'].apply(
+                                    lambda x: f"{x:.2f}" if pd.notnull(x) else "N/A"
+                                )
+                                df_ratios_display['Margen Neto'] = df_ratios_display['Margen Neto'].apply(
+                                    lambda x: f"{x:.3%}" if pd.notnull(x) else "N/A"
+                                )
+                                df_ratios_display['ROA'] = df_ratios_display['ROA'].apply(
+                                    lambda x: f"{x:.3%}" if pd.notnull(x) else "N/A"
+                                )
+                                df_ratios_display['ROE'] = df_ratios_display['ROE'].apply(
+                                    lambda x: f"{x:.3%}" if pd.notnull(x) else "N/A"
+                                )
+                                df_ratios_display['Rotación Activos Totales'] = df_ratios_display['Rotación Activos Totales'].apply(
+                                    lambda x: f"{x:.3f}" if pd.notnull(x) else "N/A"
+                                )
+                                df_ratios_display['Rotación CxC'] = df_ratios_display['Rotación CxC'].apply(
+                                    lambda x: f"{x:.3f}" if pd.notnull(x) else "N/A"
+                                )
+                                df_ratios_display['Rotación Inventarios'] = df_ratios_display['Rotación Inventarios'].apply(
+                                    lambda x: f"{x:.3f}" if pd.notnull(x) else "N/A"
+                                )
+                                
+                                st.dataframe(df_ratios_display, use_container_width=True)
+                                
+                                # Mostrar resumen estadístico
+                                if resultados_ratios.get('resumen'):
+                                    st.markdown("##### 📊 Resumen Estadístico")
+                                    col1, col2, col3, col4 = st.columns(4)
+                                    
+                                    with col1:
+                                        st.markdown("**Ratios de Liquidez**")
+                                        lc_stats = resultados_ratios['resumen'].get('liquidez_corriente', {})
+                                        if lc_stats.get('promedio'):
+                                            st.metric("Liquidez Corriente (Promedio)", f"{lc_stats['promedio']:.2f}")
+                                            st.caption(f"Min: {lc_stats['min']:.2f} | Max: {lc_stats['max']:.2f}")
+                                        
+                                        pa_stats = resultados_ratios['resumen'].get('prueba_acida', {})
+                                        if pa_stats.get('promedio'):
+                                            st.metric("Prueba Ácida (Promedio)", f"{pa_stats['promedio']:.2f}")
+                                            st.caption(f"Min: {pa_stats['min']:.2f} | Max: {pa_stats['max']:.2f}")
+                                    
+                                    with col2:
+                                        st.markdown("**Ratios de Endeudamiento**")
+                                        rdt_stats = resultados_ratios['resumen'].get('razon_deuda_total', {})
+                                        if rdt_stats.get('promedio'):
+                                            st.metric("Razón Deuda Total (Promedio)", f"{rdt_stats['promedio']:.1%}")
+                                            st.caption(f"Min: {rdt_stats['min']:.1%} | Max: {rdt_stats['max']:.1%}")
+                                        
+                                        rdp_stats = resultados_ratios['resumen'].get('razon_deuda_patrimonio', {})
+                                        if rdp_stats.get('promedio'):
+                                            st.metric("Razón Deuda/Patrimonio (Promedio)", f"{rdp_stats['promedio']:.2f}")
+                                            st.caption(f"Min: {rdp_stats['min']:.2f} | Max: {rdp_stats['max']:.2f}")
+                                    
+                                    with col3:
+                                        st.markdown("**Ratios de Rentabilidad**")
+                                        mn_stats = resultados_ratios['resumen'].get('margen_neto', {})
+                                        if mn_stats.get('promedio'):
+                                            st.metric("Margen Neto (Promedio)", f"{mn_stats['promedio']:.3%}")
+                                            st.caption(f"Min: {mn_stats['min']:.3%} | Max: {mn_stats['max']:.3%}")
+                                        
+                                        roa_stats = resultados_ratios['resumen'].get('roa', {})
+                                        if roa_stats.get('promedio'):
+                                            st.metric("ROA (Promedio)", f"{roa_stats['promedio']:.3%}")
+                                            st.caption(f"Min: {roa_stats['min']:.3%} | Max: {roa_stats['max']:.3%}")
+                                        
+                                        roe_stats = resultados_ratios['resumen'].get('roe', {})
+                                        if roe_stats.get('promedio'):
+                                            st.metric("ROE (Promedio)", f"{roe_stats['promedio']:.3%}")
+                                            st.caption(f"Min: {roe_stats['min']:.3%} | Max: {roe_stats['max']:.3%}")
+                                    
+                                    with col4:
+                                        st.markdown("**Ratios de Actividad**")
+                                        rat_stats = resultados_ratios['resumen'].get('rotacion_activos_totales', {})
+                                        if rat_stats.get('promedio'):
+                                            st.metric("Rotación Activos (Promedio)", f"{rat_stats['promedio']:.3f}")
+                                            st.caption(f"Min: {rat_stats['min']:.3f} | Max: {rat_stats['max']:.3f}")
+                                        
+                                        rcxc_stats = resultados_ratios['resumen'].get('rotacion_cuentas_cobrar', {})
+                                        if rcxc_stats.get('promedio'):
+                                            st.metric("Rotación CxC (Promedio)", f"{rcxc_stats['promedio']:.3f}")
+                                            st.caption(f"Min: {rcxc_stats['min']:.3f} | Max: {rcxc_stats['max']:.3f}")
+                                        
+                                        ri_stats = resultados_ratios['resumen'].get('rotacion_inventarios', {})
+                                        if ri_stats.get('promedio'):
+                                            st.metric("Rotación Inventarios (Promedio)", f"{ri_stats['promedio']:.3f}")
+                                            st.caption(f"Min: {ri_stats['min']:.3f} | Max: {ri_stats['max']:.3f}")
+                                
+                                # Generar y mostrar gráficos
+                                st.markdown("---")
+                                st.markdown("##### 📈 Gráficos de Tendencias")
+                                
+                                graficos_ratios = analizador.calculador_ratios.generar_graficos_ratios(resultados_ratios)
+                                
+                                if graficos_ratios:
+                                    for i, fig in enumerate(graficos_ratios, 1):
+                                        st.plotly_chart(fig, use_container_width=True)
+                                
+                                # Botón de exportación
+                                st.markdown("---")
+                                if st.button("📥 Exportar Ratios a Excel", key="export_ratios"):
+                                    archivo_salida = f"ratios_financieros_{empresa.replace(' ', '_')}.xlsx"
+                                    analizador.calculador_ratios.exportar_ratios_excel(resultados_ratios, archivo_salida)
+                                    st.success(f"✅ Ratios exportados a: {archivo_salida}")
+                            
+                            else:
+                                st.warning("⚠️ No se pudieron calcular los ratios financieros")
+                                if 'error' in resultados_ratios:
+                                    st.error(resultados_ratios['error'])
+                        else:
+                            st.warning("⚠️ No hay datos disponibles para calcular ratios financieros")
+                            st.info("Los ratios requieren archivos con datos del extractor mejorado")
+                    
+                    except Exception as e:
+                        st.error(f"❌ Error al calcular ratios financieros: {str(e)}")
+                        import traceback
+                        st.code(traceback.format_exc())
             
             with tab3:
                 st.subheader("Datos organizados por estado financiero")
@@ -1301,7 +1504,384 @@ def main():
                     st.code(traceback.format_exc())
             
             with tab5:
-                st.subheader("� Análisis Horizontal Mejorado")
+                st.subheader("📊 Análisis Vertical Consolidado")
+                st.info("🔄 Vista consolidada de análisis vertical de múltiples años (solo formato POST-2010 ≥2010)")
+                
+                try:
+                    # Obtener todos los análisis verticales realizados
+                    analisis_vertical_list = []
+                    
+                    for resultado in resultados_analisis:
+                        año_doc = resultado.get('datos', {}).get('año_documento', 0)
+                        if año_doc >= 2010:
+                            # Extraer datos del extractor
+                            datos_extractor = resultado.get('datos_extractor')
+                            if datos_extractor:
+                                # Realizar análisis vertical
+                                analisis_vert = analizador.analizador_vertical.analizar_desde_extractor(datos_extractor)
+                                analisis_vertical_list.append(analisis_vert)
+                    
+                    if not analisis_vertical_list:
+                        st.warning("⚠️ No hay archivos del formato POST-2010 (≥2010) para análisis vertical consolidado")
+                        st.info("Carga al menos 2 archivos POST-2010 para ver el análisis consolidado")
+                    elif len(analisis_vertical_list) < 2:
+                        st.warning("⚠️ Se necesitan al menos 2 archivos POST-2010 para consolidar")
+                        st.info(f"Actualmente tienes {len(analisis_vertical_list)} archivo(s). Carga más para comparar.")
+                    else:
+                        st.success(f"✅ {len(analisis_vertical_list)} archivos POST-2010 listos para consolidar")
+                        
+                        # Realizar consolidación
+                        with st.spinner("Consolidando análisis vertical..."):
+                            consolidado = analizador.consolidador_vertical.consolidar_analisis_vertical(analisis_vertical_list)
+                        
+                        if not consolidado:
+                            st.error("❌ No se pudo consolidar el análisis vertical")
+                        else:
+                            st.success("✅ Análisis vertical consolidado generado")
+                            
+                            # Mostrar información
+                            años_consolidados = []
+                            for av in analisis_vertical_list:
+                                años_consolidados.append(av['año_documento'])
+                            años_consolidados.sort(reverse=True)
+                            
+                            st.info(f"📅 Años consolidados: {', '.join(map(str, años_consolidados))}")
+                            
+                            # Tabs por estado financiero
+                            estados_disponibles = list(consolidado.keys())
+                            
+                            if 'situacion_financiera_activos' in estados_disponibles or 'situacion_financiera_pasivos' in estados_disponibles:
+                                tabs_estados = st.tabs([
+                                    "📊 Situación Financiera",
+                                    "💰 Estado de Resultados" if 'resultados' in estados_disponibles else None,
+                                    "💵 Flujo de Efectivo" if 'flujo_efectivo' in estados_disponibles else None
+                                ])
+                                
+                                # TAB: Situación Financiera
+                                with tabs_estados[0]:
+                                    st.write("#### Estado de Situación Financiera - Análisis Vertical Consolidado")
+                                    
+                                    # Sub-tabs para Activos y Pasivos
+                                    sub_tabs = st.tabs(["📈 ACTIVOS", "📉 PASIVOS"])
+                                    
+                                    # ACTIVOS
+                                    with sub_tabs[0]:
+                                        if 'situacion_financiera_activos' in consolidado:
+                                            df_activos = consolidado['situacion_financiera_activos']
+                                            
+                                            st.write(f"**Total de cuentas:** {len(df_activos)}")
+                                            
+                                            # Formatear DataFrame para visualización
+                                            df_display = df_activos.copy()
+                                            columnas_años = [col for col in df_display.columns if col != 'Cuenta']
+                                            
+                                            for col in columnas_años:
+                                                df_display[col] = df_display[col].apply(
+                                                    lambda x: f"{x:.2f}%" if pd.notnull(x) else "N/A"
+                                                )
+                                            
+                                            st.dataframe(
+                                                df_display,
+                                                use_container_width=True,
+                                                height=500
+                                            )
+                                            
+                                            # Gráficos de tendencias
+                                            st.divider()
+                                            st.write("##### 📈 Gráficos de Tendencias")
+                                            
+                                            graficos = analizador.consolidador_vertical.generar_graficos_tendencias(
+                                                df_activos,
+                                                "Activos - Estado de Situación Financiera",
+                                                top_n=10
+                                            )
+                                            
+                                            if graficos:
+                                                for fig in graficos:
+                                                    st.plotly_chart(fig, use_container_width=True)
+                                        else:
+                                            st.warning("No hay datos de activos consolidados")
+                                    
+                                    # PASIVOS
+                                    with sub_tabs[1]:
+                                        if 'situacion_financiera_pasivos' in consolidado:
+                                            df_pasivos = consolidado['situacion_financiera_pasivos']
+                                            
+                                            st.write(f"**Total de cuentas:** {len(df_pasivos)}")
+                                            
+                                            # Formatear DataFrame
+                                            df_display = df_pasivos.copy()
+                                            columnas_años = [col for col in df_display.columns if col != 'Cuenta']
+                                            
+                                            for col in columnas_años:
+                                                df_display[col] = df_display[col].apply(
+                                                    lambda x: f"{x:.2f}%" if pd.notnull(x) else "N/A"
+                                                )
+                                            
+                                            st.dataframe(
+                                                df_display,
+                                                use_container_width=True,
+                                                height=500
+                                            )
+                                            
+                                            # Gráficos
+                                            st.divider()
+                                            st.write("##### 📈 Gráficos de Tendencias")
+                                            
+                                            graficos = analizador.consolidador_vertical.generar_graficos_tendencias(
+                                                df_pasivos,
+                                                "Pasivos - Estado de Situación Financiera",
+                                                top_n=10
+                                            )
+                                            
+                                            if graficos:
+                                                for fig in graficos:
+                                                    st.plotly_chart(fig, use_container_width=True)
+                                        else:
+                                            st.warning("No hay datos de pasivos consolidados")
+                                
+                                # TAB: Estado de Resultados
+                                if 'resultados' in estados_disponibles:
+                                    with tabs_estados[1]:
+                                        st.write("#### Estado de Resultados - Análisis Vertical Consolidado")
+                                        
+                                        df_resultados = consolidado['resultados']
+                                        st.write(f"**Total de cuentas:** {len(df_resultados)}")
+                                        
+                                        # Formatear DataFrame
+                                        df_display = df_resultados.copy()
+                                        columnas_años = [col for col in df_display.columns if col != 'Cuenta']
+                                        
+                                        for col in columnas_años:
+                                            df_display[col] = df_display[col].apply(
+                                                lambda x: f"{x:.2f}%" if pd.notnull(x) else "N/A"
+                                            )
+                                        
+                                        st.dataframe(
+                                            df_display,
+                                            use_container_width=True,
+                                            height=500
+                                        )
+                                        
+                                        # Gráficos
+                                        st.divider()
+                                        st.write("##### 📈 Gráficos de Tendencias")
+                                        
+                                        graficos = analizador.consolidador_vertical.generar_graficos_tendencias(
+                                            df_resultados,
+                                            "Estado de Resultados",
+                                            top_n=10
+                                        )
+                                        
+                                        if graficos:
+                                            for fig in graficos:
+                                                st.plotly_chart(fig, use_container_width=True)
+                                
+                                # TAB: Flujo de Efectivo
+                                if 'flujo_efectivo' in estados_disponibles:
+                                    with tabs_estados[2]:
+                                        st.write("#### Flujo de Efectivo - Análisis Vertical Consolidado")
+                                        
+                                        df_flujo = consolidado['flujo_efectivo']
+                                        st.write(f"**Total de cuentas:** {len(df_flujo)}")
+                                        
+                                        # Formatear DataFrame
+                                        df_display = df_flujo.copy()
+                                        columnas_años = [col for col in df_display.columns if col != 'Cuenta']
+                                        
+                                        for col in columnas_años:
+                                            df_display[col] = df_display[col].apply(
+                                                lambda x: f"{x:.2f}%" if pd.notnull(x) else "N/A"
+                                            )
+                                        
+                                        st.dataframe(
+                                            df_display,
+                                            use_container_width=True,
+                                            height=500
+                                        )
+                                        
+                                        # Gráficos
+                                        st.divider()
+                                        st.write("##### 📈 Gráficos de Tendencias")
+                                        
+                                        graficos = analizador.consolidador_vertical.generar_graficos_tendencias(
+                                            df_flujo,
+                                            "Flujo de Efectivo",
+                                            top_n=10
+                                        )
+                                        
+                                        if graficos:
+                                            for fig in graficos:
+                                                st.plotly_chart(fig, use_container_width=True)
+                            
+                            # Botón de descarga Excel
+                            st.divider()
+                            if st.button("📥 Exportar Análisis Vertical Consolidado a Excel", key="btn_export_av_consolidado"):
+                                archivo_salida = "analisis_vertical_consolidado.xlsx"
+                                analizador.consolidador_vertical.exportar_consolidado_excel(consolidado, archivo_salida)
+                                st.success(f"✅ Archivo exportado: {archivo_salida}")
+                
+                except Exception as e:
+                    st.error(f"❌ Error en análisis vertical consolidado: {str(e)}")
+                    import traceback
+                    st.code(traceback.format_exc())
+            
+            with tab6:
+                st.subheader("📊 Análisis Horizontal Consolidado")
+                st.info("📈 Vista consolidada de variaciones interanuales (POST-2010 ≥2010)")
+                
+                try:
+                    # Filtrar solo archivos POST-2010 con análisis horizontal
+                    archivos_post_2010_ah = [
+                        r for r in resultados_analisis 
+                        if r.get('datos', {}).get('año_documento', 0) >= 2010 
+                        and r.get('analisis_horizontal') is not None
+                    ]
+                    
+                    if len(archivos_post_2010_ah) < 2:
+                        st.warning("⚠️ Se necesitan al menos 2 archivos POST-2010 para consolidar análisis horizontal")
+                        st.info("El análisis horizontal consolidado compara las variaciones de múltiples períodos")
+                    else:
+                        st.success(f"✅ {len(archivos_post_2010_ah)} archivos disponibles para consolidación")
+                        
+                        # Extraer análisis horizontal de cada archivo
+                        analisis_horizontal_list = [r['analisis_horizontal'] for r in archivos_post_2010_ah]
+                        
+                        # Consolidar análisis horizontal
+                        with st.spinner("Consolidando análisis horizontal..."):
+                            consolidado_ah = analizador.consolidador_horizontal.consolidar_analisis_horizontal(
+                                analisis_horizontal_list
+                            )
+                        
+                        if not consolidado_ah:
+                            st.warning("⚠️ No se pudo consolidar el análisis horizontal")
+                        else:
+                            st.success(f"✅ Consolidación completada: {len(consolidado_ah)} estados procesados")
+                            
+                            # Crear sub-tabs por estado
+                            estados_disponibles = list(consolidado_ah.keys())
+                            
+                            if 'situacion_financiera' in estados_disponibles:
+                                sub_tabs_ah = st.tabs([
+                                    "💼 Situación Financiera",
+                                    "📊 Estado de Resultados",
+                                    "💰 Flujo de Efectivo"
+                                ])
+                                
+                                # Tab Situación Financiera
+                                with sub_tabs_ah[0]:
+                                    if 'situacion_financiera' in consolidado_ah:
+                                        st.markdown("#### Estado de Situación Financiera - Consolidado")
+                                        df_sf = consolidado_ah['situacion_financiera']
+                                        
+                                        # Mostrar tabla
+                                        st.dataframe(
+                                            df_sf.style.format(
+                                                {col: "{:+.2f}%" for col in df_sf.columns if col != 'Cuenta'},
+                                                na_rep="N/A"
+                                            ),
+                                            use_container_width=True,
+                                            height=400
+                                        )
+                                        
+                                        st.markdown(f"**Total de cuentas:** {len(df_sf)}")
+                                        
+                                        # Gráficos
+                                        st.markdown("---")
+                                        st.markdown("#### 📈 Gráficos de Tendencias")
+                                        
+                                        graficos_sf = analizador.consolidador_horizontal.generar_graficos_tendencias(
+                                            df_sf,
+                                            "Situación Financiera",
+                                            top_n=10
+                                        )
+                                        
+                                        for i, fig in enumerate(graficos_sf, 1):
+                                            st.plotly_chart(fig, use_container_width=True)
+                                
+                                # Tab Estado de Resultados
+                                with sub_tabs_ah[1]:
+                                    if 'resultados' in consolidado_ah:
+                                        st.markdown("#### Estado de Resultados - Consolidado")
+                                        df_res = consolidado_ah['resultados']
+                                        
+                                        st.dataframe(
+                                            df_res.style.format(
+                                                {col: "{:+.2f}%" for col in df_res.columns if col != 'Cuenta'},
+                                                na_rep="N/A"
+                                            ),
+                                            use_container_width=True,
+                                            height=400
+                                        )
+                                        
+                                        st.markdown(f"**Total de cuentas:** {len(df_res)}")
+                                        
+                                        # Gráficos
+                                        st.markdown("---")
+                                        st.markdown("#### 📈 Gráficos de Tendencias")
+                                        
+                                        graficos_res = analizador.consolidador_horizontal.generar_graficos_tendencias(
+                                            df_res,
+                                            "Estado de Resultados",
+                                            top_n=10
+                                        )
+                                        
+                                        for i, fig in enumerate(graficos_res, 1):
+                                            st.plotly_chart(fig, use_container_width=True)
+                                    else:
+                                        st.info("No hay datos de estado de resultados disponibles")
+                                
+                                # Tab Flujo de Efectivo
+                                with sub_tabs_ah[2]:
+                                    if 'flujo_efectivo' in consolidado_ah:
+                                        st.markdown("#### Flujo de Efectivo - Consolidado")
+                                        df_flujo = consolidado_ah['flujo_efectivo']
+                                        
+                                        st.dataframe(
+                                            df_flujo.style.format(
+                                                {col: "{:+.2f}%" for col in df_flujo.columns if col != 'Cuenta'},
+                                                na_rep="N/A"
+                                            ),
+                                            use_container_width=True,
+                                            height=400
+                                        )
+                                        
+                                        st.markdown(f"**Total de cuentas:** {len(df_flujo)}")
+                                        
+                                        # Gráficos
+                                        st.markdown("---")
+                                        st.markdown("#### 📈 Gráficos de Tendencias")
+                                        
+                                        graficos_flujo = analizador.consolidador_horizontal.generar_graficos_tendencias(
+                                            df_flujo,
+                                            "Flujo de Efectivo",
+                                            top_n=10
+                                        )
+                                        
+                                        for i, fig in enumerate(graficos_flujo, 1):
+                                            st.plotly_chart(fig, use_container_width=True)
+                                    else:
+                                        st.info("No hay datos de flujo de efectivo disponibles")
+                            
+                            # Botón de exportación
+                            st.markdown("---")
+                            st.markdown("#### 💾 Exportar Consolidado")
+                            
+                            if st.button("📥 Descargar Excel - Análisis Horizontal Consolidado"):
+                                archivo_salida = "analisis_horizontal_consolidado.xlsx"
+                                analizador.consolidador_horizontal.exportar_consolidado_excel(
+                                    consolidado_ah,
+                                    archivo_salida
+                                )
+                                st.success(f"✅ Archivo exportado: {archivo_salida}")
+                
+                except Exception as e:
+                    st.error(f"❌ Error en análisis horizontal consolidado: {str(e)}")
+                    import traceback
+                    st.code(traceback.format_exc())
+            
+            with tab7:
+                st.subheader("📈 Análisis Horizontal Mejorado")
                 st.info("📊 Análisis horizontal año a año (solo formato POST-2010 ≥2010)")
                 
                 try:
@@ -1534,8 +2114,8 @@ def main():
                     import traceback
                     st.code(traceback.format_exc())
             
-            with tab6:
-                st.subheader("�📊 Análisis Comparativo (Multi-período)")
+            with tab8:
+                st.subheader("📊 Análisis Comparativo (Multi-período)")
                 st.info("Esta sección permite comparar múltiples períodos cuando se cargan varios archivos.")
                 
                 if len(resultados_analisis) > 1:
@@ -1543,7 +2123,7 @@ def main():
                 else:
                     st.warning("⚠️ Carga más de un archivo para habilitar el análisis comparativo")
             
-            with tab7:
+            with tab9:
                 st.subheader("Datos detallados por archivo")
                 
                 for resultado in resultados_analisis:
