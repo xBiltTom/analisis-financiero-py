@@ -227,17 +227,31 @@ class AnalisisHorizontalConsolidado:
         figuras.append(fig2)
         
         # Gráfico 3: Barras para identificar mayores aumentos y disminuciones
-        # Separar en aumentos y disminuciones
+        # Cada período (año) tiene un color distintivo
         df_top5 = df_valido.nlargest(5, 'variacion_promedio_abs')
         
         fig3 = go.Figure()
         
-        for comp in columnas_comp:
+        # Definir paleta de colores para diferentes años
+        colores_por_periodo = [
+            '#1f77b4',  # Azul
+            '#ff7f0e',  # Naranja
+            '#2ca02c',  # Verde
+            '#d62728',  # Rojo
+            '#9467bd',  # Púrpura
+            '#8c564b',  # Marrón
+            '#e377c2',  # Rosa
+            '#7f7f7f',  # Gris
+            '#bcbd22',  # Verde lima
+            '#17becf'   # Cian
+        ]
+        
+        for idx, comp in enumerate(columnas_comp):
             valores = df_top5[comp].tolist()
             cuentas = [c[:30] for c in df_top5['Cuenta'].tolist()]
             
-            # Separar en positivos y negativos
-            colores = ['green' if v > 0 else 'red' if v < 0 else 'gray' for v in valores]
+            # Asignar color por período (índice)
+            color = colores_por_periodo[idx % len(colores_por_periodo)]
             
             fig3.add_trace(go.Bar(
                 name=comp,
@@ -245,7 +259,7 @@ class AnalisisHorizontalConsolidado:
                 y=valores,
                 text=[f"{v:+.1f}%" if pd.notnull(v) else "" for v in valores],
                 textposition='outside',
-                marker_color=colores
+                marker_color=color
             ))
         
         fig3.update_layout(

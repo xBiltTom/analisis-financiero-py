@@ -913,7 +913,7 @@ def main():
                             # Mostrar años disponibles
                             if resumen['años_disponibles']:
                                 st.write("**Años disponibles:**")
-                                st.write(", ".join(resumen['años_disponibles']))
+                                st.write(", ".join(str(año) for año in resumen['años_disponibles']))
                             
                             # Mostrar cabeceras disponibles
                             if resumen['cabeceras_disponibles']:
@@ -934,15 +934,14 @@ def main():
             st.header("📈 Análisis Consolidado")
             
             # Crear tabs para diferentes vistas
-            tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8, tab9 = st.tabs([
+            tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8 = st.tabs([
                 "Resumen General", 
-                "Vista Consolidada (≥2010)", 
                 "Estados Financieros", 
                 "Análisis Vertical", 
+                "Análisis Horizontal",
                 "Análisis Vertical Consolidado",
                 "Análisis Horizontal Consolidado",
-                "Análisis Horizontal",
-                "Comparativo", 
+                "Vista Consolidada - Ratios", 
                 "Datos Detallados"
             ])
             
@@ -964,8 +963,8 @@ def main():
                 df_resumen = pd.DataFrame(datos_resumen)
                 st.dataframe(df_resumen, use_container_width=True)
             
-            with tab2:
-                st.subheader("📊 Vista Consolidada Multi-Período (Formato ≥2010)")
+            with tab7:
+                st.subheader("📊 Vista Consolidada Multi-Período - Ratios Financieros")
                 st.caption("*Consolida automáticamente múltiples archivos de años consecutivos en una sola vista por bloque*")
                 
                 # Verificar si hay archivos POST-2010 - CORREGIDO: usar 'datos' no 'datos_extraidos'
@@ -1217,88 +1216,291 @@ def main():
                         import traceback
                         st.code(traceback.format_exc())
             
-            with tab3:
-                st.subheader("Datos organizados por estado financiero")
+            with tab2:
+                st.subheader("📋 Estados Financieros")
+                st.info("📊 Vista detallada de estados financieros (solo formato POST-2010 ≥2010)")
                 
-                for resultado in resultados_analisis:
-                    st.write(f"### 📄 {resultado['archivo']}")
-                    año_doc = resultado['datos'].get('año_documento', 2020)
-                    st.write(f"**Año del documento:** {año_doc}")
+                try:
+                    # Filtrar solo archivos POST-2010
+                    archivos_post_2010 = [
+                        r for r in resultados_analisis 
+                        if r.get('datos', {}).get('año_documento', 0) >= 2010
+                    ]
                     
-                    if año_doc <= 2009:
-                        st.info("📅 Formato aplicable para años 2009 hacia abajo")
+                    if not archivos_post_2010:
+                        st.warning("⚠️ No hay archivos del formato POST-2010 (≥2010) para mostrar estados financieros")
+                        st.info("Los estados financieros solo se muestran para archivos de años 2010 en adelante")
                     else:
-                        st.info("📅 Formato aplicable para años 2010 hacia arriba")
-                    
-                    estados_financieros = resultado['datos'].get('estados_financieros', {})
-                    
-                    if not estados_financieros:
-                        st.warning("No se detectaron estados financieros en este archivo")
-                        continue
-                    
-                    for clave_estado, info_estado in estados_financieros.items():
-                        if info_estado.get('datos'):
-                            st.write(f"#### 📋 {info_estado['nombre']}")
-                            
-                            # Convertir datos a DataFrame - SOLO VALORES NUMÉRICOS
-                            datos_estado = []
-                            for item in info_estado['datos']:
-                                fila = {'Cuenta': item.get('cuenta', 'Sin cuenta')}
-                                
-                                # Agregar solo las columnas numéricas (años)
-                                for clave, valor in item.items():
-                                    if clave != 'cuenta':
-                                        if isinstance(valor, dict):
-                                            # Solo agregar el valor numérico sin sufijo
-                                            numero_convertido = valor.get('numero', 0)
-                                            fila[clave] = numero_convertido
-                                        else:
-                                            # Para otros campos que no son dict (ej: 'es_total', 'NOTA')
-                                            # No incluirlos si no son años
-                                            if clave.isdigit() or any(char.isdigit() for char in str(clave)):
-                                                fila[clave] = valor if valor else 0
-                                
-                                datos_estado.append(fila)
-                            
-                            if datos_estado:
-                                df_estado = pd.DataFrame(datos_estado)
-                                
-                                # Ordenar columnas: primero 'Cuenta', luego años en orden descendente
-                                columnas = ['Cuenta']
-                                años_cols = [col for col in df_estado.columns if col != 'Cuenta']
-                                años_cols_sorted = sorted(años_cols, reverse=True)  # Más reciente primero
-                                columnas.extend(años_cols_sorted)
-                                
-                                df_estado = df_estado[columnas]
-                                
-                                # Formatear números para mejor visualización
-                                for col in df_estado.columns:
-                                    if col != 'Cuenta':
-                                        try:
-                                            df_estado[col] = df_estado[col].apply(
-                                                lambda x: f"{x:,.0f}" if isinstance(x, (int, float)) and x != 0 else '-'
-                                            )
-                                        except:
-                                            pass
-                                
-                                st.dataframe(df_estado, use_container_width=True)
-                                
-                                # Mostrar estadísticas básicas
-                                st.write(f"**Total de cuentas detectadas:** {len(datos_estado)}")
-                            else:
-                                st.info("No se encontraron datos para este estado financiero")
+                        st.success(f"✅ {len(archivos_post_2010)} archivo(s) POST-2010 encontrado(s)")
+                        
+                        # Crear opciones del selector con formato "Empresa - Año"
+                        opciones_selector = {}
+                        for r in archivos_post_2010:
+                            año_doc = r.get('datos', {}).get('año_documento', 'N/A')
+                            empresa = r.get('datos', {}).get('metadatos', {}).get('empresa', 'No identificada')
+                            etiqueta = f"{empresa} - {año_doc}"
+                            opciones_selector[etiqueta] = r['archivo']
+                        
+                        # Selector de archivo con etiquetas de empresa-año
+                        archivo_seleccionado_label = st.selectbox(
+                            "Selecciona una empresa y año para ver estados financieros:",
+                            list(opciones_selector.keys()),
+                            key="selector_estados_financieros"
+                        )
+                        
+                        # Obtener el archivo correspondiente
+                        archivo_seleccionado = opciones_selector[archivo_seleccionado_label]
+                        
+                        # Obtener resultado seleccionado
+                        resultado_sel = next(r for r in archivos_post_2010 if r['archivo'] == archivo_seleccionado)
+                        
+                        año_doc = resultado_sel['datos'].get('año_documento', 2020)
+                        estados_financieros = resultado_sel['datos'].get('estados_financieros', {})
+                        
+                        if not estados_financieros:
+                            st.warning("⚠️ No se detectaron estados financieros en este archivo")
                         else:
-                            st.write(f"#### 📋 {info_estado['nombre']}")
-                            st.info("No se encontraron datos para este estado financiero")
-                    
-                    st.divider()
+                            # Crear sub-tabs para cada estado financiero
+                            tab_situacion, tab_resultados, tab_patrimonio, tab_flujo = st.tabs([
+                                "📊 Estado de Situación Financiera",
+                                "💰 Estado de Resultados",
+                                "🏛️ Estado de Cambios en el Patrimonio",
+                                "💵 Estado de Flujo de Efectivo"
+                            ])
+                            
+                            # Tab: Estado de Situación Financiera
+                            with tab_situacion:
+                                estado_key = 'estado_situacion_financiera'
+                                if estado_key in estados_financieros and estados_financieros[estado_key].get('datos'):
+                                    info_estado = estados_financieros[estado_key]
+                                    st.write(f"### {info_estado['nombre']}")
+                                    
+                                    # Convertir datos a DataFrame
+                                    datos_estado = []
+                                    for item in info_estado['datos']:
+                                        fila = {'Cuenta': item.get('cuenta', 'Sin cuenta')}
+                                        
+                                        # Agregar solo las columnas numéricas (años)
+                                        for clave, valor in item.items():
+                                            if clave != 'cuenta':
+                                                if isinstance(valor, dict):
+                                                    numero_convertido = valor.get('numero', 0)
+                                                    fila[clave] = numero_convertido
+                                                else:
+                                                    if clave.isdigit() or any(char.isdigit() for char in str(clave)):
+                                                        fila[clave] = valor if valor else 0
+                                        
+                                        datos_estado.append(fila)
+                                    
+                                    if datos_estado:
+                                        df_estado = pd.DataFrame(datos_estado)
+                                        
+                                        # Ordenar columnas: primero 'Cuenta', luego años en orden descendente
+                                        columnas = ['Cuenta']
+                                        años_cols = [col for col in df_estado.columns if col != 'Cuenta']
+                                        años_cols_sorted = sorted(años_cols, reverse=True)
+                                        columnas.extend(años_cols_sorted)
+                                        
+                                        df_estado = df_estado[columnas]
+                                        
+                                        # Formatear números para mejor visualización
+                                        for col in df_estado.columns:
+                                            if col != 'Cuenta':
+                                                try:
+                                                    df_estado[col] = df_estado[col].apply(
+                                                        lambda x: f"{x:,.0f}" if isinstance(x, (int, float)) and x != 0 else '-'
+                                                    )
+                                                except:
+                                                    pass
+                                        
+                                        st.dataframe(df_estado, use_container_width=True)
+                                        st.write(f"**Total de cuentas:** {len(datos_estado)}")
+                                    else:
+                                        st.info("No se encontraron datos para este estado financiero")
+                                else:
+                                    st.info("📭 No hay datos disponibles para Estado de Situación Financiera")
+                            
+                            # Tab: Estado de Resultados
+                            with tab_resultados:
+                                estado_key = 'estado_resultados'
+                                if estado_key in estados_financieros and estados_financieros[estado_key].get('datos'):
+                                    info_estado = estados_financieros[estado_key]
+                                    st.write(f"### {info_estado['nombre']}")
+                                    
+                                    # Convertir datos a DataFrame
+                                    datos_estado = []
+                                    for item in info_estado['datos']:
+                                        fila = {'Cuenta': item.get('cuenta', 'Sin cuenta')}
+                                        
+                                        for clave, valor in item.items():
+                                            if clave != 'cuenta':
+                                                if isinstance(valor, dict):
+                                                    numero_convertido = valor.get('numero', 0)
+                                                    fila[clave] = numero_convertido
+                                                else:
+                                                    if clave.isdigit() or any(char.isdigit() for char in str(clave)):
+                                                        fila[clave] = valor if valor else 0
+                                        
+                                        datos_estado.append(fila)
+                                    
+                                    if datos_estado:
+                                        df_estado = pd.DataFrame(datos_estado)
+                                        
+                                        columnas = ['Cuenta']
+                                        años_cols = [col for col in df_estado.columns if col != 'Cuenta']
+                                        años_cols_sorted = sorted(años_cols, reverse=True)
+                                        columnas.extend(años_cols_sorted)
+                                        
+                                        df_estado = df_estado[columnas]
+                                        
+                                        for col in df_estado.columns:
+                                            if col != 'Cuenta':
+                                                try:
+                                                    df_estado[col] = df_estado[col].apply(
+                                                        lambda x: f"{x:,.0f}" if isinstance(x, (int, float)) and x != 0 else '-'
+                                                    )
+                                                except:
+                                                    pass
+                                        
+                                        st.dataframe(df_estado, use_container_width=True)
+                                        st.write(f"**Total de cuentas:** {len(datos_estado)}")
+                                    else:
+                                        st.info("No se encontraron datos para este estado financiero")
+                                else:
+                                    st.info("📭 No hay datos disponibles para Estado de Resultados")
+                            
+                            # Tab: Estado de Cambios en el Patrimonio
+                            with tab_patrimonio:
+                                estado_key = 'estado_cambios_patrimonio'
+                                if estado_key in estados_financieros and estados_financieros[estado_key].get('datos'):
+                                    info_estado = estados_financieros[estado_key]
+                                    st.write(f"### {info_estado['nombre']}")
+                                    
+                                    # Convertir datos a DataFrame
+                                    datos_estado = []
+                                    for item in info_estado['datos']:
+                                        fila = {'Cuenta': item.get('cuenta', 'Sin cuenta')}
+                                        
+                                        for clave, valor in item.items():
+                                            if clave != 'cuenta':
+                                                if isinstance(valor, dict):
+                                                    numero_convertido = valor.get('numero', 0)
+                                                    fila[clave] = numero_convertido
+                                                else:
+                                                    if clave.isdigit() or any(char.isdigit() for char in str(clave)):
+                                                        fila[clave] = valor if valor else 0
+                                        
+                                        datos_estado.append(fila)
+                                    
+                                    if datos_estado:
+                                        df_estado = pd.DataFrame(datos_estado)
+                                        
+                                        columnas = ['Cuenta']
+                                        años_cols = [col for col in df_estado.columns if col != 'Cuenta']
+                                        años_cols_sorted = sorted(años_cols, reverse=True)
+                                        columnas.extend(años_cols_sorted)
+                                        
+                                        df_estado = df_estado[columnas]
+                                        
+                                        for col in df_estado.columns:
+                                            if col != 'Cuenta':
+                                                try:
+                                                    df_estado[col] = df_estado[col].apply(
+                                                        lambda x: f"{x:,.0f}" if isinstance(x, (int, float)) and x != 0 else '-'
+                                                    )
+                                                except:
+                                                    pass
+                                        
+                                        st.dataframe(df_estado, use_container_width=True)
+                                        st.write(f"**Total de cuentas:** {len(datos_estado)}")
+                                    else:
+                                        st.info("No se encontraron datos para este estado financiero")
+                                else:
+                                    st.info("📭 No hay datos disponibles para Estado de Cambios en el Patrimonio")
+                            
+                            # Tab: Estado de Flujo de Efectivo
+                            with tab_flujo:
+                                estado_key = 'estado_flujo_efectivo'
+                                if estado_key in estados_financieros and estados_financieros[estado_key].get('datos'):
+                                    info_estado = estados_financieros[estado_key]
+                                    st.write(f"### {info_estado['nombre']}")
+                                    
+                                    # Convertir datos a DataFrame
+                                    datos_estado = []
+                                    for item in info_estado['datos']:
+                                        fila = {'Cuenta': item.get('cuenta', 'Sin cuenta')}
+                                        
+                                        for clave, valor in item.items():
+                                            if clave != 'cuenta':
+                                                if isinstance(valor, dict):
+                                                    numero_convertido = valor.get('numero', 0)
+                                                    fila[clave] = numero_convertido
+                                                else:
+                                                    if clave.isdigit() or any(char.isdigit() for char in str(clave)):
+                                                        fila[clave] = valor if valor else 0
+                                        
+                                        datos_estado.append(fila)
+                                    
+                                    if datos_estado:
+                                        df_estado = pd.DataFrame(datos_estado)
+                                        
+                                        columnas = ['Cuenta']
+                                        años_cols = [col for col in df_estado.columns if col != 'Cuenta']
+                                        años_cols_sorted = sorted(años_cols, reverse=True)
+                                        columnas.extend(años_cols_sorted)
+                                        
+                                        df_estado = df_estado[columnas]
+                                        
+                                        for col in df_estado.columns:
+                                            if col != 'Cuenta':
+                                                try:
+                                                    df_estado[col] = df_estado[col].apply(
+                                                        lambda x: f"{x:,.0f}" if isinstance(x, (int, float)) and x != 0 else '-'
+                                                    )
+                                                except:
+                                                    pass
+                                        
+                                        st.dataframe(df_estado, use_container_width=True)
+                                        st.write(f"**Total de cuentas:** {len(datos_estado)}")
+                                    else:
+                                        st.info("No se encontraron datos para este estado financiero")
+                                else:
+                                    st.info("📭 No hay datos disponibles para Estado de Flujo de Efectivo")
+                
+                except Exception as e:
+                    st.error(f"❌ Error al mostrar estados financieros: {str(e)}")
+                    import traceback
+                    st.code(traceback.format_exc())
             
-            with tab4:
+            with tab3:
                 st.subheader("📊 Análisis Vertical Mejorado")
                 
                 try:
+                    # Crear opciones del selector con "Empresa - Año"
+                    opciones_selector = {}
                     for resultado in resultados_analisis:
-                        st.write(f"### 📄 {resultado['archivo']}")
+                        año_doc = resultado.get('datos', {}).get('año_documento', 'N/A')
+                        empresa = resultado.get('datos', {}).get('metadatos', {}).get('empresa', 'No identificada')
+                        etiqueta = f"{empresa} - {año_doc}"
+                        opciones_selector[etiqueta] = resultado['archivo']
+                    
+                    if not opciones_selector:
+                        st.warning("⚠️ No hay archivos disponibles para análisis vertical")
+                    else:
+                        st.success(f"✅ {len(opciones_selector)} archivo(s) disponible(s)")
+                        
+                        # Selector de archivo
+                        archivo_seleccionado_label = st.selectbox(
+                            "Selecciona una empresa y año para análisis vertical:",
+                            list(opciones_selector.keys()),
+                            key="selector_vertical"
+                        )
+                        
+                        # Obtener el archivo correspondiente
+                        archivo_seleccionado = opciones_selector[archivo_seleccionado_label]
+                        resultado = next(r for r in resultados_analisis if r['archivo'] == archivo_seleccionado)
+                        
+                        st.write(f"### 📄 {archivo_seleccionado_label}")
                         
                         # Leer el archivo HTML original para análisis
                         ruta_html = os.path.join(analizador.temp_dir, resultado['archivo'].replace('.xls', '.html').replace('.xlsx', '.html'))
@@ -1380,13 +1582,6 @@ def main():
                                             df_mostrar.columns = ['Cuenta', 'Valor', '% del Total Activos']
                                             
                                             st.dataframe(df_mostrar, use_container_width=True, height=400)
-                                            
-                                            # Gráfico de barras de principales activos
-                                            st.write("**Top 10 Activos por Participación:**")
-                                            df_chart = df_activos.nlargest(10, 'analisis_vertical')
-                                            if not df_chart.empty:
-                                                chart_data = df_chart.set_index('cuenta')['analisis_vertical']
-                                                st.bar_chart(chart_data)
                                         
                                         # PASIVOS
                                         if balance_data['pasivos']:
@@ -1401,13 +1596,6 @@ def main():
                                             df_mostrar_p.columns = ['Cuenta', 'Valor', '% del Total Pasivos']
                                             
                                             st.dataframe(df_mostrar_p, use_container_width=True, height=400)
-                                            
-                                            # Gráfico de barras de principales pasivos
-                                            st.write("**Top 10 Pasivos por Participación:**")
-                                            df_chart_p = df_pasivos.nlargest(10, 'analisis_vertical')
-                                            if not df_chart_p.empty:
-                                                chart_data_p = df_chart_p.set_index('cuenta')['analisis_vertical']
-                                                st.bar_chart(chart_data_p)
                                         
                                         st.info(f"⚠️ PATRIMONIO: No se calcula análisis vertical (según especificación)")
                                     
@@ -1435,13 +1623,6 @@ def main():
                                             df_mostrar_r.columns = ['Cuenta', 'Valor', '% de Ingresos']
                                             
                                             st.dataframe(df_mostrar_r, use_container_width=True, height=400)
-                                            
-                                            # Gráfico de composición
-                                            st.write("**Composición del Estado de Resultados:**")
-                                            df_chart_r = df_resultados[df_resultados['analisis_vertical'].abs() > 1]  # Solo > 1%
-                                            if not df_chart_r.empty:
-                                                chart_data_r = df_chart_r.set_index('cuenta')['analisis_vertical']
-                                                st.bar_chart(chart_data_r)
                                     
                                     tab_idx += 1
                                 
@@ -1452,14 +1633,6 @@ def main():
                                         st.write(f"#### 💵 {flujo_data['nombre_estado']}")
                                         st.write(f"**Año analizado:** {flujo_data['año_analisis']}")
                                         
-                                        # Mostrar bases detectadas (múltiples secciones)
-                                        if flujo_data.get('bases_detectadas'):
-                                            st.write("##### 🎯 Bases Detectadas (100%)")
-                                            cols_bases = st.columns(len(flujo_data['bases_detectadas']))
-                                            for idx, (key, nombre_base) in enumerate(flujo_data['bases_detectadas'].items()):
-                                                with cols_bases[idx]:
-                                                    st.info(f"**{key.replace('_', ' ').title()}**\n\n{nombre_base}")
-                                        
                                         if flujo_data['cuentas_analizadas']:
                                             st.write("##### 📊 Análisis Vertical por Secciones")
                                             st.caption("*Cada cuenta como % de su base correspondiente (Operación, Inversión, Financiación)*")
@@ -1467,36 +1640,14 @@ def main():
                                             df_flujo = pd.DataFrame(flujo_data['cuentas_analizadas'])
                                             df_flujo['Valor'] = df_flujo['valor'].apply(lambda x: f"{x:,.0f}")
                                             df_flujo['% Vertical'] = df_flujo['analisis_vertical'].apply(lambda x: f"{x:.2f}%")
-                                            df_flujo['Es Base'] = df_flujo.get('es_base', False)
                                             
-                                            df_mostrar_f = df_flujo[['cuenta', 'Valor', '% Vertical', 'Es Base']].copy()
-                                            df_mostrar_f.columns = ['Cuenta', 'Valor', '% de Base', 'Es Base 100%']
+                                            df_mostrar_f = df_flujo[['cuenta', 'Valor', '% Vertical']].copy()
+                                            df_mostrar_f.columns = ['Cuenta', 'Valor', '% de Base']
                                             
                                             st.dataframe(df_mostrar_f, use_container_width=True, height=400)
-                            
-                            # Botón de exportación a Excel
-                            st.write("---")
-                            nombre_base = resultado['archivo'].split('.')[0]
-                            archivo_excel = f"analisis_vertical_{nombre_base}.xlsx"
-                            
-                            if st.button(f"📥 Exportar a Excel: {archivo_excel}", key=f"export_{resultado['archivo']}"):
-                                analizador.analizador_vertical.exportar_a_excel(analisis_vertical, archivo_excel)
-                                st.success(f"✅ Archivo exportado: {archivo_excel}")
-                                
-                                # Ofrecer descarga
-                                with open(archivo_excel, 'rb') as f:
-                                    st.download_button(
-                                        label="⬇️ Descargar Excel",
-                                        data=f.read(),
-                                        file_name=archivo_excel,
-                                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                                        key=f"download_{resultado['archivo']}"
-                                    )
                         
                         else:
                             st.warning(f"❌ No se encontró el archivo HTML: {ruta_html}")
-                        
-                        st.divider()
                     
                 except Exception as e:
                     st.error(f"❌ Error en análisis vertical: {str(e)}")
@@ -1596,9 +1747,71 @@ def main():
                                                 top_n=10
                                             )
                                             
-                                            if graficos:
-                                                for fig in graficos:
-                                                    st.plotly_chart(fig, use_container_width=True)
+                                            if graficos and len(graficos) >= 3:
+                                                # Mostrar gráfico de líneas (primer gráfico)
+                                                st.plotly_chart(graficos[0], use_container_width=True)
+                                                
+                                                # Mostrar mapa de calor (segundo gráfico)
+                                                st.plotly_chart(graficos[1], use_container_width=True)
+                                            
+                                            # Gráfico de barras de composición por año
+                                            st.divider()
+                                            st.write("##### 📊 Composición con años - Activos")
+                                            
+                                            # Buscar las filas específicas en el DataFrame con orden de prioridad
+                                            # IMPORTANTE: Buscar primero las más específicas para evitar coincidencias incorrectas
+                                            cuentas_buscar_orden = [
+                                                ('Total Activos No Corrientes', ['TOTAL DE ACTIVOS NO CORRIENTES', 'TOTAL ACTIVOS NO CORRIENTES', 'TOTAL DE ACTIVO NO CORRIENTE', 'TOTAL ACTIVO NO CORRIENTE']),
+                                                ('Total Activos Corrientes', ['TOTAL DE ACTIVOS CORRIENTES', 'TOTAL ACTIVOS CORRIENTES', 'TOTAL ACTIVO CORRIENTE']),
+                                                ('TOTAL DE ACTIVOS', ['TOTAL DE ACTIVOS', 'TOTAL ACTIVOS', 'TOTAL ACTIVO'])
+                                            ]
+                                            
+                                            datos_grafico = {}
+                                            filas_usadas = set()  # Para evitar usar la misma fila dos veces
+                                            
+                                            for nombre_display, variantes in cuentas_buscar_orden:
+                                                for idx, row in df_activos.iterrows():
+                                                    if idx in filas_usadas:
+                                                        continue
+                                                    cuenta_upper = str(row['Cuenta']).strip().upper()
+                                                    for variante in variantes:
+                                                        if cuenta_upper == variante.upper():
+                                                            datos_grafico[nombre_display] = row
+                                                            filas_usadas.add(idx)
+                                                            break
+                                                    if nombre_display in datos_grafico:
+                                                        break
+                                            
+                                            if len(datos_grafico) == 3 and len(columnas_años) > 0:
+                                                import plotly.graph_objects as go
+                                                
+                                                fig = go.Figure()
+                                                años_sorted = sorted(columnas_años, reverse=True)
+                                                
+                                                # Agregar las 3 barras por año
+                                                for nombre, row in datos_grafico.items():
+                                                    valores = [row[año] if pd.notnull(row[año]) else 0 for año in años_sorted]
+                                                    fig.add_trace(go.Bar(
+                                                        name=nombre,
+                                                        x=[str(año) for año in años_sorted],
+                                                        y=valores,
+                                                        text=[f"{v:.1f}%" if v != 0 else "" for v in valores],
+                                                        textposition='auto'
+                                                    ))
+                                                
+                                                fig.update_layout(
+                                                    title="Composición con años - Activos",
+                                                    xaxis_title="Año",
+                                                    yaxis_title="Análisis Vertical (%)",
+                                                    barmode='group',
+                                                    height=450,
+                                                    showlegend=True,
+                                                    legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
+                                                )
+                                                
+                                                st.plotly_chart(fig, use_container_width=True)
+                                            else:
+                                                st.info(f"⚠️ No se encontraron todas las cuentas requeridas. Encontradas: {list(datos_grafico.keys())}")
                                         else:
                                             st.warning("No hay datos de activos consolidados")
                                     
@@ -1624,7 +1837,7 @@ def main():
                                                 height=500
                                             )
                                             
-                                            # Gráficos
+                                            # Gráficos de tendencias
                                             st.divider()
                                             st.write("##### 📈 Gráficos de Tendencias")
                                             
@@ -1634,9 +1847,71 @@ def main():
                                                 top_n=10
                                             )
                                             
-                                            if graficos:
-                                                for fig in graficos:
-                                                    st.plotly_chart(fig, use_container_width=True)
+                                            if graficos and len(graficos) >= 3:
+                                                # Mostrar gráfico de líneas (primer gráfico)
+                                                st.plotly_chart(graficos[0], use_container_width=True)
+                                                
+                                                # Mostrar mapa de calor (segundo gráfico)
+                                                st.plotly_chart(graficos[1], use_container_width=True)
+                                            
+                                            # Gráfico de barras de composición por año
+                                            st.divider()
+                                            st.write("##### 📊 Composición con años - Pasivos")
+                                            
+                                            # Buscar las filas específicas en el DataFrame con orden de prioridad
+                                            # IMPORTANTE: Buscar primero las más específicas para evitar coincidencias incorrectas
+                                            cuentas_buscar_orden = [
+                                                ('Total Pasivos No Corrientes', ['TOTAL DE PASIVOS NO CORRIENTES', 'TOTAL PASIVOS NO CORRIENTES', 'TOTAL DE PASIVO NO CORRIENTE', 'TOTAL PASIVO NO CORRIENTE']),
+                                                ('Total Pasivos Corrientes', ['TOTAL DE PASIVOS CORRIENTES', 'TOTAL PASIVOS CORRIENTES', 'TOTAL PASIVO CORRIENTE']),
+                                                ('Total Pasivos', ['TOTAL DE PASIVOS', 'TOTAL PASIVOS', 'TOTAL PASIVO'])
+                                            ]
+                                            
+                                            datos_grafico = {}
+                                            filas_usadas = set()  # Para evitar usar la misma fila dos veces
+                                            
+                                            for nombre_display, variantes in cuentas_buscar_orden:
+                                                for idx, row in df_pasivos.iterrows():
+                                                    if idx in filas_usadas:
+                                                        continue
+                                                    cuenta_upper = str(row['Cuenta']).strip().upper()
+                                                    for variante in variantes:
+                                                        if cuenta_upper == variante.upper():
+                                                            datos_grafico[nombre_display] = row
+                                                            filas_usadas.add(idx)
+                                                            break
+                                                    if nombre_display in datos_grafico:
+                                                        break
+                                            
+                                            if len(datos_grafico) == 3 and len(columnas_años) > 0:
+                                                import plotly.graph_objects as go
+                                                
+                                                fig = go.Figure()
+                                                años_sorted = sorted(columnas_años, reverse=True)
+                                                
+                                                # Agregar las 3 barras por año
+                                                for nombre, row in datos_grafico.items():
+                                                    valores = [row[año] if pd.notnull(row[año]) else 0 for año in años_sorted]
+                                                    fig.add_trace(go.Bar(
+                                                        name=nombre,
+                                                        x=[str(año) for año in años_sorted],
+                                                        y=valores,
+                                                        text=[f"{v:.1f}%" if v != 0 else "" for v in valores],
+                                                        textposition='auto'
+                                                    ))
+                                                
+                                                fig.update_layout(
+                                                    title="Composición con años - Pasivos",
+                                                    xaxis_title="Año",
+                                                    yaxis_title="Análisis Vertical (%)",
+                                                    barmode='group',
+                                                    height=450,
+                                                    showlegend=True,
+                                                    legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
+                                                )
+                                                
+                                                st.plotly_chart(fig, use_container_width=True)
+                                            else:
+                                                st.info(f"⚠️ No se encontraron todas las cuentas requeridas. Encontradas: {list(datos_grafico.keys())}")
                                         else:
                                             st.warning("No hay datos de pasivos consolidados")
                                 
@@ -1699,20 +1974,6 @@ def main():
                                             use_container_width=True,
                                             height=500
                                         )
-                                        
-                                        # Gráficos
-                                        st.divider()
-                                        st.write("##### 📈 Gráficos de Tendencias")
-                                        
-                                        graficos = analizador.consolidador_vertical.generar_graficos_tendencias(
-                                            df_flujo,
-                                            "Flujo de Efectivo",
-                                            top_n=10
-                                        )
-                                        
-                                        if graficos:
-                                            for fig in graficos:
-                                                st.plotly_chart(fig, use_container_width=True)
                             
                             # Botón de descarga Excel
                             st.divider()
@@ -1786,7 +2047,7 @@ def main():
                                         
                                         st.markdown(f"**Total de cuentas:** {len(df_sf)}")
                                         
-                                        # Gráficos
+                                        # Gráficos (sin cascada, barras con colores por año)
                                         st.markdown("---")
                                         st.markdown("#### 📈 Gráficos de Tendencias")
                                         
@@ -1796,7 +2057,8 @@ def main():
                                             top_n=10
                                         )
                                         
-                                        for i, fig in enumerate(graficos_sf, 1):
+                                        # Mostrar solo los primeros 3 gráficos (sin cascada)
+                                        for i, fig in enumerate(graficos_sf[:3], 1):
                                             st.plotly_chart(fig, use_container_width=True)
                                 
                                 # Tab Estado de Resultados
@@ -1816,7 +2078,7 @@ def main():
                                         
                                         st.markdown(f"**Total de cuentas:** {len(df_res)}")
                                         
-                                        # Gráficos
+                                        # Gráficos (solo líneas y heatmap, sin barras)
                                         st.markdown("---")
                                         st.markdown("#### 📈 Gráficos de Tendencias")
                                         
@@ -1826,7 +2088,8 @@ def main():
                                             top_n=10
                                         )
                                         
-                                        for i, fig in enumerate(graficos_res, 1):
+                                        # Mostrar solo los primeros 2 gráficos (líneas y heatmap)
+                                        for i, fig in enumerate(graficos_res[:2], 1):
                                             st.plotly_chart(fig, use_container_width=True)
                                     else:
                                         st.info("No hay datos de estado de resultados disponibles")
@@ -1847,19 +2110,7 @@ def main():
                                         )
                                         
                                         st.markdown(f"**Total de cuentas:** {len(df_flujo)}")
-                                        
-                                        # Gráficos
-                                        st.markdown("---")
-                                        st.markdown("#### 📈 Gráficos de Tendencias")
-                                        
-                                        graficos_flujo = analizador.consolidador_horizontal.generar_graficos_tendencias(
-                                            df_flujo,
-                                            "Flujo de Efectivo",
-                                            top_n=10
-                                        )
-                                        
-                                        for i, fig in enumerate(graficos_flujo, 1):
-                                            st.plotly_chart(fig, use_container_width=True)
+                                        # No mostrar gráficos para Flujo de Efectivo
                                     else:
                                         st.info("No hay datos de flujo de efectivo disponibles")
                             
@@ -1880,7 +2131,7 @@ def main():
                     import traceback
                     st.code(traceback.format_exc())
             
-            with tab7:
+            with tab4:
                 st.subheader("📈 Análisis Horizontal Mejorado")
                 st.info("📊 Análisis horizontal año a año (solo formato POST-2010 ≥2010)")
                 
@@ -1897,13 +2148,23 @@ def main():
                     else:
                         st.success(f"✅ {len(archivos_post_2010)} archivo(s) POST-2010 encontrado(s)")
                         
-                        # Selector de archivo
-                        opciones_archivos = [r['archivo'] for r in archivos_post_2010]
-                        archivo_seleccionado = st.selectbox(
-                            "Selecciona un archivo para análisis horizontal:",
-                            opciones_archivos,
+                        # Crear opciones del selector con formato "Empresa - Año"
+                        opciones_selector = {}
+                        for r in archivos_post_2010:
+                            año_doc = r.get('datos', {}).get('año_documento', 'N/A')
+                            empresa = r.get('datos', {}).get('metadatos', {}).get('empresa', 'No identificada')
+                            etiqueta = f"{empresa} - {año_doc}"
+                            opciones_selector[etiqueta] = r['archivo']
+                        
+                        # Selector de archivo con etiquetas de empresa-año
+                        archivo_seleccionado_label = st.selectbox(
+                            "Selecciona una empresa y año para análisis horizontal:",
+                            list(opciones_selector.keys()),
                             key="selector_horizontal"
                         )
+                        
+                        # Obtener el archivo correspondiente
+                        archivo_seleccionado = opciones_selector[archivo_seleccionado_label]
                         
                         # Obtener resultado seleccionado
                         resultado_sel = next(r for r in archivos_post_2010 if r['archivo'] == archivo_seleccionado)
@@ -2115,15 +2376,6 @@ def main():
                     st.code(traceback.format_exc())
             
             with tab8:
-                st.subheader("📊 Análisis Comparativo (Multi-período)")
-                st.info("Esta sección permite comparar múltiples períodos cuando se cargan varios archivos.")
-                
-                if len(resultados_analisis) > 1:
-                    st.success(f"✅ {len(resultados_analisis)} archivos disponibles para comparación")
-                else:
-                    st.warning("⚠️ Carga más de un archivo para habilitar el análisis comparativo")
-            
-            with tab9:
                 st.subheader("Datos detallados por archivo")
                 
                 for resultado in resultados_analisis:
