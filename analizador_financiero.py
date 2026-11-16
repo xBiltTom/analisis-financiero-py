@@ -19,33 +19,29 @@ from ratios_financieros import CalculadorRatiosFinancieros
 from groq import Groq
 from descargador_smv import DescargadorSMV
 
-# Importar configuración de API
-try:
-    from config_api import (
-        GROQ_API_KEY,
-        GROQ_MODEL,
-        GROQ_TEMPERATURE,
-        GROQ_MAX_TOKENS_FASE1,
-        GROQ_MAX_TOKENS_FASE2,
-        GROQ_MAX_TOKENS_FASE3,
-        GROQ_TOP_P
-    )
-except ImportError:
-    st.error("""
-    ❌ **Error: Archivo de configuración no encontrado**
-    
-    Por favor, crea el archivo `config_api.py` con tu API key de Groq:
-    
-    1. Copia el template:
-       ```
-       copy config_api.template.py config_api.py
-       ```
-    
-    2. Edita `config_api.py` y agrega tu API key
-    
-    3. Obtén tu API key en: https://console.groq.com/
-    """)
-    st.stop()
+import os
+from dotenv import load_dotenv
+
+# Cargar variables de entorno desde .env
+load_dotenv()
+
+# Configuración de API Groq y Modelo IA
+GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")
+# Retrocompatibilidad en caso de existir config_api.py legacy
+if not GROQ_API_KEY or GROQ_API_KEY in ("TU_API_KEY_AQUI", "gsk_tu_api_key_aqui"):
+    try:
+        from config_api import GROQ_API_KEY as _LEGACY_KEY
+        if _LEGACY_KEY and _LEGACY_KEY not in ("TU_API_KEY_AQUI", "gsk_tu_api_key_aqui"):
+            GROQ_API_KEY = _LEGACY_KEY
+    except ImportError:
+        pass
+
+GROQ_MODEL = os.getenv("GROQ_MODEL", "openai/gpt-oss-20b")
+GROQ_TEMPERATURE = float(os.getenv("GROQ_TEMPERATURE", "0.6"))
+GROQ_MAX_TOKENS_FASE1 = int(os.getenv("GROQ_MAX_TOKENS_FASE1", "2500"))
+GROQ_MAX_TOKENS_FASE2 = int(os.getenv("GROQ_MAX_TOKENS_FASE2", "2800"))
+GROQ_MAX_TOKENS_FASE3 = int(os.getenv("GROQ_MAX_TOKENS_FASE3", "2500"))
+GROQ_TOP_P = float(os.getenv("GROQ_TOP_P", "0.9"))
 
 # Configuración de la página
 st.set_page_config(
@@ -66,6 +62,9 @@ def analizar_ratios_con_ia(resultados_ratios: Dict[str, Any], empresa: str) -> s
     Returns:
         str: Análisis completo generado por la IA (combinación de 3 análisis)
     """
+    if not GROQ_API_KEY or GROQ_API_KEY in ("TU_API_KEY_AQUI", "gsk_tu_api_key_aqui"):
+        return "❌ **Error de Configuración:** No se ha configurado `GROQ_API_KEY` en el archivo `.env`.\n\nPor favor, añade tu API key de Groq en el archivo `.env` (obtenla gratis en https://console.groq.com/)."
+
     try:
         # Inicializar cliente Groq con API key desde configuración
         client = Groq(api_key=GROQ_API_KEY)

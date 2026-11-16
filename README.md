@@ -25,13 +25,13 @@ Sistema integral que automatiza **completamente** el análisis financiero de emp
 
 ## 🚀 Inicio Rápido (3 Pasos)
 
-### 1. Configurar API Key
+### 1. Configurar Variables de Entorno (.env)
 
 ```bash
-# Copiar template de configuración
-copy config_api.template.py config_api.py
+# Copiar plantilla de configuración
+cp .env.example .env
 
-# Editar config_api.py y agregar tu API key de Groq
+# Editar .env y agregar tu API key de Groq
 # Obtén tu API key en: https://console.groq.com/
 ```
 
@@ -209,23 +209,23 @@ Ver: **[Docs/SOLUCION_VISUAL_V2.md](Docs/SOLUCION_VISUAL_V2.md)**
 
 ### Configuración de API Key
 
-La API key de Groq está en un archivo separado `config_api.py` (ignorado por Git):
+La API key de Groq y los parámetros del modelo se configuran mediante un archivo `.env` (ignorado por Git):
 
 **Primera vez:**
 ```bash
-# 1. Copiar template
-copy config_api.template.py config_api.py
+# 1. Copiar plantilla de variables de entorno
+cp .env.example .env
 
-# 2. Editar config_api.py y agregar tu API key
-# GROQ_API_KEY = "tu_api_key_aqui"
+# 2. Editar .env y agregar tu API key
+# GROQ_API_KEY=gsk_tu_api_key_aqui
 
 # 3. Obtener API key: https://console.groq.com/
 ```
 
 **Importante:**
-- ⚠️ `config_api.py` está en `.gitignore` y NO se sube a Git
+- ⚠️ `.env` está en `.gitignore` y NO se sube a Git
 - ✅ Cada usuario debe configurar su propia API key
-- ✅ Ver documentación completa: [Docs/SEGURIDAD_API_KEY.md](Docs/SEGURIDAD_API_KEY.md)
+- ✅ Plantilla de referencia versionada: `.env.example`
 
 ## 📞 Soporte
 
